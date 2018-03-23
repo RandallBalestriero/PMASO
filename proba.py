@@ -13,7 +13,7 @@ class DenseLayer:
 		self.sigmas2 = tf.Variable(tf.random_uniform([1]))
 		self.m       = tf.Variable(tf.random_normal((batch_size,n_out,r)))
 		self.p       = tf.Variable(tf.random_normal((batch_size,n_out,r)))
-		self.v2      = tf.Variable(tf.random_uniform((batch_size,n_out,r)))
+		self.v2      = tf.Variable(tf.random_uniform((1,n_out,r)))
 		self.M       = tf.reduce_sum(self.m*self.p,axis=2)
 	def forward(self,x):
 		return tf.reduce_sum(tf.tensordot(x,self.W,[[1],[2]])*self.p,axis=2)
@@ -30,23 +30,26 @@ class InputLayer:
 
 def init_latent(x,layers):
 	new_p = []
-	new_m = [x]
+	new_m = []
 	new_v = []
+        M     = []
 	for i in xrange(len(layers)):
 		if(isinstance(layers[i],InputLayer)):
                         new_m.append(tf.assign(layers[i].m,x))
+                        M.append(new_m[-1])
 		if(isinstance(layers[i],DenseLayer)):
-			proj       = tf.tensordot(new_m[-1],layers[i].W,[[1],[2]])
+			proj       = tf.tensordot(M[-1],layers[i].W,[[1],[2]])
 			max_values = tf.reduce_max(proj,axis=2,keep_dims=True)
 			mask       = tf.cast(tf.greater(proj,max_values-eps),tf.float32)
 			renorm_mask= mask/tf.reduce_sum(mask,axis=2,keep_dims=True) 
 			new_p.append(tf.assign(layers[i].p,renorm_mask))
 			new_m.append(tf.assign(layers[i].m,proj))
-			value      = tf.reduce_sum(tf.expand_dims(tf.reduce_sum(layers[i].W*layers[i].W,axis=2),0)*new_p[-1],axis=2)
+                        M.append(tf.reduce_sum(new_p[-1]*new_m[-1],axis=2))
+			value      = tf.expand_dims(tf.reduce_sum(layers[i].W*layers[i].W,axis=2),0)
 			if(i<len(layers)-1):
-				new_v.append(tf.assign(layers[i].v2,1/(1/layers[i+1].sigmas2+value/layers[i].sigmas2)))
+				new_v.append(tf.assign(layers[i].v2,1/(1/layers[i+1].sigmas2[0]+value/layers[i].sigmas2[0])))
 			else:
-                                new_v.append(tf.assign(layers[i].v2,1/(value/layers[i].sigmas2)))
+                                new_v.append(tf.assign(layers[i].v2,1/(value/layers[i].sigmas2[0])))
 	return new_p,new_m
 
 
@@ -75,14 +78,14 @@ def get_v(layers):
 
 def update_m(layers,l,k):
        if(isinstance(layers[l],DenseLayer)):
-                scaling = tf.reduce_sum(layers[l].W[k]*layer[l].W[k],axis=1)
+                scaling = tf.reduce_sum(layers[l].W[k]*layers[l].W[k],axis=1)
                 if(l<len(layers)-1):
                         scaling  += layers[l].sigmas2[0]/layers[l+1].sigmas2[0]
-                        prior     = layers[l+1].backward(1)[:,k]
+                        prior     = layers[l+1].backward(tf.constant(1,dtype=tf.float32,shape=(1,layers[l+1].D)))[:,k]
                 else:
-                        prior     = 0
+                        prior     = tf.zeros(layers[l].batch_size)#tf.constant(0,dtype=tf.float32,shape=(layers[l].batch_size))
                 rec_error = layers[l-1].M-layers[l].backward(1-tf.one_hot(k,layers[l].D))
-                value     = (1/scaling)*(tf.reduce_sum(tf.expand_dims(layers[l].W[k],0)*tf.expand_dims(rec_error,1),axis=2)+prior)
+                value     = (1/scaling)*(tf.reduce_sum(tf.expand_dims(layers[l].W[k],0)*tf.expand_dims(rec_error,1),axis=2)+tf.expand_dims(prior,-1))
                 indices   = tf.transpose(tf.stack([tf.range(layers[0].batch_size),tf.fill([layers[0].batch_size],k)]))
                 m         = tf.scatter_nd_update(layers[l].m,indices,value)
 		return m
@@ -90,33 +93,34 @@ def update_m(layers,l,k):
 
 def update_v(layers,l):
        if(isinstance(layers[l],DenseLayer)):
-		scaling = tf.reduce_sum(layers[l].W*layer[l].W,axis=2)/layers[l].sigmas2[0]
+		scaling = tf.reduce_sum(layers[l].W*layers[l].W,axis=2)/layers[l].sigmas2[0]
                 if(l<len(layers)-1):
 			scaling+=1/layers[l+1].sigmas2[0]
-                v2      = tf.assign(layers[l].v2,1/scaling)
+                v2      = tf.assign(layers[l].v2,tf.expand_dims(1/scaling,0))
 		return v2
 
 
 def update_p(layers,l,k):
        if(isinstance(layers[l],DenseLayer)):
-                scaling = tf.reduce_sum(layers[l].W[k]*layer[l].W[k],axis=1)
+                scaling = tf.reduce_sum(layers[l].W[k]*layers[l].W[k],axis=1)
                 if(l<len(layers)-1):
                         scaling  += layers[l].sigmas2[0]/layers[l+1].sigmas2[0]
-                        prior     = layers[l+1].backward(1)[:,k]/layers[l+1].sigmas2[0]
+                        prior     = layers[l+1].backward(tf.constant(1,dtype=tf.float32,shape=(1,layers[l+1].D)))[:,k]/layers[l+1].sigmas2[0]
                 else:
-			prior     = 0
+			prior     = tf.zeros(layers[l].batch_size)
                 rec_error = (layers[l-1].M-layers[l].backward(1-tf.one_hot(k,layers[l].D)))/layers[l].sigmas2[0]
-                value     = (tf.reduce_sum(tf.expand_dims(layers[l].W[k],0)*tf.expand_dims(rec_error,1),axis=2)+prior)*layers[l].m[:,k,:]
+                value     = (tf.reduce_sum(tf.expand_dims(layers[l].W[k],0)*tf.expand_dims(rec_error,1),axis=2)+tf.expand_dims(prior,-1))*layers[l].m[:,k,:]-(tf.pow(layers[l].m[:,k,:],2)+layers[l].v2[:,k,:])*scaling/2+tf.log(tf.expand_dims(layers[l].pi[k],0)+0.000000001)
+                expvalue=tf.exp(value)
                 indices   = tf.transpose(tf.stack([tf.range(layers[0].batch_size),tf.fill([layers[0].batch_size],k)]))
-                p         = tf.scatter_nd_update(layers[l].m,indices,value-(tf.pow(layers[l].m[:,k,:],2)+layers[l].v2[:,k,:])*scaling/2)
-
+                p         = tf.scatter_nd_update(layers[l].p,indices,expvalue/tf.reduce_sum(expvalue,axis=1,keepdims=True))
+                return p
 
 
 def update_W(layers,l,k):
        if(isinstance(layers[l],DenseLayer)):
-		rec     = (layers[l-1].M-layers[l].backward(1-tf.one_hot(k,layers[l].D)))*layers[l].m[:,k,:]
+		rec     = tf.expand_dims((layers[l-1].M-layers[l].backward(1-tf.one_hot(k,layers[l].D))),1)*tf.expand_dims(layers[l].m[:,k,:],-1)
 		scaling = tf.pow(layers[l].m[:,k,:],2)+layers[l].v2[:,k,:]
-                w       = tf.scatter_update(layers[l].W,tf.constant(k),tf.reduce_sum(rec,axis=0)/tf.reduce_sum(scaling,axis=0))
+                w       = tf.scatter_update(layers[l].W,tf.constant(k),tf.reduce_sum(rec,axis=0)/tf.expand_dims(tf.reduce_sum(scaling,axis=0),-1))
                 return w
 
 
@@ -124,7 +128,7 @@ def update_W(layers,l,k):
 def update_pi(layers,l):
        if(isinstance(layers[l],DenseLayer)):
 		p = tf.reduce_sum(layers[l].p,axis=0)
-                w = tf.assign(layers[l].pi,p/tf.reduce_sum(p,axis=1))
+                w = tf.assign(layers[l].pi,p/tf.reduce_sum(p,axis=1,keepdims=True))
                 return w
 
 
@@ -176,10 +180,10 @@ def Estep(x_batch,ite):
                         all_p[l].append(session.run(get_p(layers))[l-1])
                         all_m[l].append(session.run(get_m(layers))[l-1])
                         for k in xrange(layers[l].D):
-                                print l,k
+                                print l,k,layers
                                 session.run(update_p(layers,l,k))
                                 session.run(update_m(layers,l,k))
-                                session.run(update_v(layers,l,k))
+                        session.run(update_v(layers,l))
         return all_p,all_m
 
 
@@ -191,6 +195,7 @@ def Mstep(ite):
 	        session.run(update_pi(layers,l))
         for i in xrange(ite):
                 for l in xrange(1,len(layers)):
+                        session.run(update_pi(layers,l))
                         for k in xrange(layers[l].D):
                                 print l,k
                                 session.run(update_W(layers,l,k))
@@ -214,8 +219,15 @@ session.run(init)
 
 
 
-all_p,all_m=Estep(randn(batch_size,3).astype('float32'),3)
-Mstep(3)
+all_p,all_m=Estep(randn(batch_size,3).astype('float32'),5)
+Mstep(2)
+all_p,all_m=Estep(randn(batch_size,3).astype('float32'),5)
+Mstep(2)
+all_p,all_m=Estep(randn(batch_size,3).astype('float32'),5)
+Mstep(2)
+all_p,all_m=Estep(randn(batch_size,3).astype('float32'),5)
+Mstep(2)
+
 #all_p,all_m=Estep(randn(batch_size,3).astype('float32'),3)
 
 
