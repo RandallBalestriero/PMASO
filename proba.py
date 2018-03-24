@@ -99,7 +99,7 @@ def approx_m(layers,l):
                         scaling  += float32(1)#layers[l].sigmas2[0]/layers[l+1].sigmas2[0]
                         prior     = layers[l+1].backward(tf.constant(1,dtype=tf.float32,shape=(1,layers[l+1].D)))#[:,k]
                 else:
-                        prior     = float32(0)#tf.zeros((layers[l].batch_size,layers[l].K))#tf.constant(0,dtype=tf.float32,shape=(layers[l].batch_size))
+                        prior     = float32(0)
                 proj      = tf.tensordot(layers[l-1].M,layers[l].W,[[1],[2]])+tf.expand_dims(prior,-1)
                 value     = proj/tf.expand_dims(scaling,0)
                 m         = tf.assign(layers[l].m,value)
@@ -142,14 +142,7 @@ def update_p(layers,l,k):
 
 def approx_p(layers,l):
        if(isinstance(layers[l],DenseLayer)):
-                scaling = tf.expand_dims(tf.reduce_sum(layers[l].W*layers[l].W,axis=2),0)
-                if(l<len(layers)-1):
-                        scaling  += float32(1)#layers[l].sigmas2[0]/layers[l+1].sigmas2[0]
-                        prior     = layers[l+1].backward(tf.constant(1,dtype=tf.float32,shape=(1,layers[l+1].D)))#[:,k]/layers[l+1].sigmas2[0]
-                else:
-			prior     = float32(0)#tf.zeros(layers[l].batch_size)
-                rec_error = tf.pow(layers[l].m,2)*(1+scaling)/2+tf.expand_dims(tf.log(layers[l].pi),0)#(tf.tensordot(layers[l-1].M,layers[l].W,[[1],[2]])+tf.expand_dims(prior,-1))-tf.expand_dims(tf.log(layers[l].pi),0)#-tf.pow(layers[l].m,2)*(scaling)/2-tf.expand_dims(tf.log(layers[l].pi),0)
-                expvalue=tf.exp(rec_error)
+                expvalue=tf.exp(tf.pow(layers[l].m,2)/(2*layers[l].v2))
                 p         = tf.assign(layers[l].p,expvalue/tf.reduce_sum(expvalue,axis=2,keepdims=True))
                 return p
 
@@ -222,12 +215,10 @@ def Estep(x_batch,ite):
                 for l in xrange(1,len(layers)):
                         all_p[l].append(session.run(get_p(layers))[l-1])
                         all_m[l].append(session.run(get_m(layers))[l-1])
-                        for k in xrange(layers[l].D):
-                                print l,layers
-                                session.run(update_m(layers,l,k))
+                        print l,layers
+                        session.run(update_m(layers,l))
                         session.run(update_v(layers,l))
-                        for k in xrange(layers[l].D):
-                                session.run(update_p(layers,l,k))
+                        session.run(update_p(layers,l))
 #                        session.run(update_v(layers,l))
         return all_p,all_m
 
