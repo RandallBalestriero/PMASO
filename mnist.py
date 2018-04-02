@@ -70,7 +70,7 @@ else:
 
 
 x_train          -= x_train.mean((1,2,3),keepdims=True)
-x_train          /= abs(x_train).max((1,2,3),keepdims=True)
+x_train          /= abs(x_train).max((1,2,3),keepdims=True)#/10
 x_test           -= x_test.mean((1,2,3),keepdims=True)
 x_test           /= abs(x_test).max((1,2,3),keepdims=True)
 x_train           = x_train.astype('float32')
@@ -84,27 +84,34 @@ y_test            = array(y_test).astype('int32')
 
 
 
-XX = x_train[:1000]
 
+#XX = load_digits()['data']#x_train[permutation(x_train.shape[0])[:1000]]+randn(1000,1,28,28)*0.01
+XX = x_train[permutation(x_train.shape[0])[:1500]]+randn(1500,1,28,28)*0.1
+#XX-=XX.mean(1,keepdims=True)
+#XX/=XX.max(1,keepdims=True)
+
+#XX=XX.reshape((XX.shape[0],1,8,8))
 input_shape = XX.shape
 
 layers = [InputLayer(input_shape)]
-layers.append(ConvLayer(layers[-1],K=15,I=3,J=3,R=2,stride=2))
-#layers.append(DenseLayer(layers[-1],K=15,R=2))
+#layers.append(DenseLayer(layers[-1],K=32,R=2))
+layers.append(DenseLayer(layers[-1],K=8,R=2))
 layers.append(UnsupFinalLayer(layers[-1],10))
 
-init_v2(layers)
+#init_v2(layers)
 
 x       = tf.placeholder(tf.float32,shape=layers[0].input_shape)
 
-opti = tf.train.RMSPropOptimizer(0.100810005)
-train_op1 = opti.minimize(-KL(layers),var_list=tf.get_collection('latent'))
-print opti.variables()
-train_op2 = opti.minimize(-likelihood(layers),var_list=tf.get_collection('params'))
-print opti.variables()
+#opti = tf.train.AdamOptimizer(10.20800810005)
+#train_op1 = opti.minimize(-KL(layers)/200,var_list=tf.get_collection('latent'))
+#print opti.variables()
+#train_op2 = opti.minimize(-likelihood(layers),var_list=tf.get_collection('params'))
+
+session_config = tf.ConfigProto(allow_soft_placement=False,
+                                          log_device_placement=True)
 
 
-session = tf.Session()
+session = tf.Session(config=session_config)
 init = tf.global_variables_initializer()
 session.run(init)
 
@@ -117,23 +124,140 @@ session.run(init_latent(x,layers),feed_dict={x:XX})
 
 
 U=session.run(sample(layers))
-print shape(U)
+#print shape(U)
+#figure()
+#for i in xrange(25):
+#    subplot(5,5,1+i)
+#    imshow(U[i,0],aspect='auto')
+#    colorbar()
+
+
+updates_v2 = update_v2(layers)
+updates_m = update_m(layers)
+updates_mk = update_mk(layers)
+updates_sigma = update_sigma(layers)
+updates_p = update_p(layers)
+updates_pk= update_pk(layers)
+updates_W = update_W(layers)
+updates_Wk = update_Wk(layers)
+updates_pi = update_pi(layers)
+
+#updates_p = update_p(layers)
+
+PI1=[]
+PI2 =[]
+PI1.append(session.run(layers[1].pi))
+PI2.append(session.run(layers[2].pi))
+
+
+P1 = []
+P2 = []
+
+KLl=KL(layers) 
+LIKl=likelihood(layers)
+
+for k in xrange(0):
+#	print tf.get_collection('latent')
+        print "KL",session.run(KLl)
+#        session.run(updates_sigma)
+        session.run(updates_v2)
+#        print session.run(layers[1].m)
+        print "AFTER V",session.run(KLl)
+	for i in xrange(3):
+                session.run(updates_m)
+                print "AFTER M",session.run(KLl)
+                session.run(updates_p)
+                print "AFTER P",session.run(KLl)
+        print "LIKELI",session.run(LIKl)
+#        session.run(updates_pi)
+        for i in xrange(3):
+#                print "INIT LIKE",session.run(likelihood(layers))
+#                for k in xrange(2):
+                session.run(updates_W)
+                print "AFTER W",session.run(likelihood(layers))
+#                imshow(reshape(session.run(layers[1].W)[0,0],(28,28)))
+#                show()
+#                for k in xrange(2):
+                session.run(updates_pi)
+                print "AFTER P",session.run(likelihood(layers))
+#                session.run(updates_sigma)
+                print "AFTER S",session.run(likelihood(layers))
+#                print session.run([layers[1].sigmas2,layers[2].sigmas2])
+#                PI1.append(session.run(layers[1].pi))
+#                PI2.append(session.run(layers[2].pi))
+#	        session.run(train_op2)
+#                print session.run(likelihood(layers))
+
+
+
+
+
+
+for k in xrange(10):
+        print "KL",session.run(KLl)
+        session.run(updates_v2)
+        print "AFTER V",session.run(KLl)
+#        session.run(updates_sigma)
+#        print "AFTER S",session.run(KL(layers))
+        for i in xrange(2):
+                for l in xrange(1):
+                        for k in permutation(layers[l+1].K).astype('int32'):
+                                session.run(updates_mk[l][k])
+                                print "AFTER M",l,k,session.run(KLl)
+                for l in xrange(1):
+                        for k in permutation(layers[l+1].K).astype('int32'):
+                                session.run(updates_pk[l][k])
+                                print "AFTER P",l,k,session.run(KLl)
+                session.run(updates_p[-1])
+                print "AFTER P last",session.run(KLl)
+                session.run(updates_v2)
+                print "AFTER V",l,session.run(KLl)
+        print "LIKELI",session.run(LIKl)
+        session.run(updates_pi)
+        print "AFTER P",session.run(LIKl)
+        session.run(updates_sigma)
+        print "AFTER S",session.run(LIKl),session.run([layers[1].sigmas2,layers[2].sigmas2])
+        for i in xrange(2):
+                for l in xrange(1):
+                        for k in permutation(layers[l+1].K).astype('int32'):
+                                session.run(updates_Wk[l][k])
+                                print "AFTER W",l,k,session.run(LIKl)
+                session.run(updates_W[-1])
+                print "AFTER W",session.run(LIKl)
+#                session.run(updates_sigma)
+#                print "AFTER S",session.run(likelihood(layers))
+#                print session.run([layers[1].sigmas2,layers[2].sigmas2])
+#                PI1.append(session.run(layers[1].pi))
+#                PI2.append(session.run(layers[2].pi))
+#	        session.run(train_op2)
+#                print session.run(likelihood(layers))
+
+
+
+#PI1=asarray(PI1)
+#PI2=asarray(PI2)
+
+#figure()
+#
+#subplot(121)
+#for i in xrange(32):
+#    for j in xrange(2):
+#        plot(PI1[:,i,j])
+#subplot(122)
+#for i in xrange(10):
+#    plot(PI2[:,0,i])
+#show()
+
+
+
+
+
+U=session.run(sampletrue(layers))
 figure()
 for i in xrange(25):
     subplot(5,5,1+i)
     imshow(U[i,0],aspect='auto')
     colorbar()
-
-
-for k in xrange(6):
-	print tf.get_collection('latent')
-	for i in xrange(16):
-		session.run(train_op1)
-		print "KL",session.run(KL(layers))
-	for i in xrange(16):
-	        session.run(train_op2)
-	        print session.run(likelihood(layers))
-
 
 U=session.run(sample(layers))
 figure()

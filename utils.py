@@ -14,14 +14,106 @@ def init_latent(x,layers):
 
 
 
-def init_v2(layers):
+def update_v2(layers):
+        v2 = []
         for l in layers:
-#                if(isinstance(layers[i],DenseLayer)):
-                l.init_v2()
-#                        =tf.stop_gradient(1/tf.expand_dims((tf.reduce_sum(layers[i].W*layers[i].W,axis=2)/layers[i].sigmas2[0]+1/layers[i+1].sigmas2[0]),0))
-#		elif(isinstance(layers[i],ConvLayer)):
-#			value = tf.reshape(tf.transpose(tf.reduce_sum(layers[i].W*layers[i].W,axis=[1,2,3])),(1,layers[i].K,layers[i].R,1,1))
-#                        layers[i].v2=tf.stop_gradient(1/(value/layers[i].sigmas2[0]+1/layers[i+1].sigmas2[0]))
+                v2+=l.update_v2()
+        return v2
+
+
+def update_p(layers):
+        v2 = []
+        for l in layers:
+                v2+=l.update_p()
+        return v2
+
+
+
+def update_W(layers):
+        v2 = []
+        for l in layers:
+                v2+=l.update_W()
+        return v2
+
+
+
+def update_m(layers):
+        v2 = []
+        for l in layers:
+                v2+=l.update_m()
+        return v2
+
+
+
+
+def update_pk(layers):
+        v2 = []
+        for l,i in zip(layers[1:-1],range(len(layers)-2)):
+                v2.append([])
+                for k in xrange(l.K):
+                    v2[i]+=l.update_pk(k)
+        return v2
+
+def update_mk(layers):
+        v2 = []
+        for l,i in zip(layers[1:-1],range(len(layers)-2)):
+                v2.append([])
+                for k in xrange(l.K):
+                    v2[i]+=l.update_mk(k)
+        return v2
+
+
+def update_Wk(layers):
+        v2 = []
+        for l,i in zip(layers[1:-1],range(len(layers)-2)):
+                v2.append([])
+                for k in xrange(l.K):
+                    v2[i]+=l.update_Wk(k)
+        return v2
+
+
+
+
+
+
+def update_W(layers):
+        v2 = []
+        for l in layers:
+                v2+=l.update_W()
+        return v2
+
+
+
+def update_m(layers):
+        v2 = []
+        for l in layers:
+                v2+=l.update_m()
+        return v2
+
+
+
+
+
+
+
+
+
+def update_sigma(layers):
+        v2 = []
+        for l in layers:
+                v2+=l.update_sigma()
+        return v2
+
+
+def update_pi(layers):
+        v2 = []
+        for l in layers:
+                v2+=l.update_pi()
+        return v2
+
+
+
+
 
 
 
@@ -35,9 +127,9 @@ def sample(layers):
 
 
 
-#def sample(layers):
-#        s=float32(1)
-#        return layers[1].backward(s)
+def sampletrue(layers):
+        s=float32(1)
+        return layers[1].backward(0)
 
 
 def SSE(x,y):
