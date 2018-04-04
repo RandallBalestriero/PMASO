@@ -23,16 +23,16 @@ def update_v2(layers):
 
 def update_p(layers):
         v2 = []
-        for l in layers:
-                v2+=l.update_p()
+#        for l in layers:
+        v2=layers[-1].update_p()
         return v2
 
 
 
 def update_W(layers):
         v2 = []
-        for l in layers:
-                v2+=l.update_W()
+#        for l in layers:
+        v2 =layers[-1].update_W()
         return v2
 
 
@@ -78,8 +78,7 @@ def update_Wk(layers):
 
 def update_W(layers):
         v2 = []
-        for l in layers:
-                v2+=l.update_W()
+        v2=layers[-1].update_W()
         return v2
 
 
@@ -129,7 +128,7 @@ def sample(layers):
 
 def sampletrue(layers):
         s=float32(1)
-        return layers[1].backward(0)
+        return layers[1].backward()
 
 
 def SSE(x,y):

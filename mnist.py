@@ -89,13 +89,13 @@ y_test            = array(y_test).astype('int32')
 XX = x_train[permutation(x_train.shape[0])[:1500]]+randn(1500,1,28,28)*0.1
 #XX-=XX.mean(1,keepdims=True)
 #XX/=XX.max(1,keepdims=True)
-
+XX = transpose(XX,[0,2,3,1])
 #XX=XX.reshape((XX.shape[0],1,8,8))
 input_shape = XX.shape
 
 layers = [InputLayer(input_shape)]
 #layers.append(DenseLayer(layers[-1],K=32,R=2))
-layers.append(DenseLayer(layers[-1],K=8,R=2))
+layers.append(ConvLayer(layers[-1],stride=4,Ic=4,Jc=4,K=8,R=2))
 layers.append(UnsupFinalLayer(layers[-1],10))
 
 #init_v2(layers)
@@ -133,7 +133,7 @@ U=session.run(sample(layers))
 
 
 updates_v2 = update_v2(layers)
-updates_m = update_m(layers)
+#updates_m = update_m(layers)
 updates_mk = update_mk(layers)
 updates_sigma = update_sigma(layers)
 updates_p = update_p(layers)
@@ -191,14 +191,15 @@ for k in xrange(0):
 
 
 
+samples = sample(layers)
 
 
 for k in xrange(10):
         print "KL",session.run(KLl)
         session.run(updates_v2)
         print "AFTER V",session.run(KLl)
-#        session.run(updates_sigma)
-#        print "AFTER S",session.run(KL(layers))
+        session.run(updates_sigma)
+        print "AFTER S",session.run(KLl)
         for i in xrange(2):
                 for l in xrange(1):
                         for k in permutation(layers[l+1].K).astype('int32'):
@@ -214,7 +215,7 @@ for k in xrange(10):
                 print "AFTER V",l,session.run(KLl)
         print "LIKELI",session.run(LIKl)
         session.run(updates_pi)
-        print "AFTER P",session.run(LIKl)
+        print "AFTER pi",session.run(LIKl)
         session.run(updates_sigma)
         print "AFTER S",session.run(LIKl),session.run([layers[1].sigmas2,layers[2].sigmas2])
         for i in xrange(2):
@@ -250,22 +251,25 @@ for k in xrange(10):
 
 
 
+#samplet = sampletrue(layers)
+#samples = sample(layers)
+#U=session.run(samplet)
+#figure()
+#for i in xrange(25):
+#    subplot(5,5,1+i)
+#    imshow(U[i,0],aspect='auto')
+#    colorbar()
 
-
-U=session.run(sampletrue(layers))
+U=session.run(samples)
 figure()
-for i in xrange(25):
-    subplot(5,5,1+i)
-    imshow(U[i,0],aspect='auto')
+for i in xrange(36):
+    subplot(6,6,1+i)
+    imshow(U[i,:,:,0],aspect='auto')
+    xticks([])
+    yticks([])
     colorbar()
 
-U=session.run(sample(layers))
-figure()
-for i in xrange(25):
-    subplot(5,5,1+i)
-    imshow(U[i,0],aspect='auto')
-    colorbar()
-
+tight_layout()
 show()
 
 
