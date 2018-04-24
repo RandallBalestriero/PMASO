@@ -69,7 +69,7 @@ else:
 
 
 
-x_train          -= x_train.mean((1,2,3),keepdims=True)
+#x_train          -= x_train.mean((1,2,3),keepdims=True)
 x_train          /= abs(x_train).max((1,2,3),keepdims=True)#/10
 x_test           -= x_test.mean((1,2,3),keepdims=True)
 x_test           /= abs(x_test).max((1,2,3),keepdims=True)
@@ -86,7 +86,10 @@ y_test            = array(y_test).astype('int32')
 
 
 #XX = load_digits()['data']#x_train[permutation(x_train.shape[0])[:1000]]+randn(1000,1,28,28)*0.01
-XX = x_train[permutation(x_train.shape[0])[:1500]]+randn(1500,1,28,28)*0.1
+XX = x_train[permutation(x_train.shape[0])[:3500]]+randn(3500,1,28,28)*0.001
+#XX = x_train[find(y_train==0)[:1500]]
+
+
 #XX-=XX.mean(1,keepdims=True)
 #XX/=XX.max(1,keepdims=True)
 XX = transpose(XX,[0,2,3,1])
@@ -95,7 +98,9 @@ input_shape = XX.shape
 
 layers = [InputLayer(input_shape)]
 #layers.append(DenseLayer(layers[-1],K=32,R=2))
-layers.append(ConvLayer(layers[-1],stride=4,Ic=4,Jc=4,K=8,R=2))
+layers.append(ConvLayer(layers[-1],stride=4,Ic=4,Jc=4,K=12,R=2))
+layers.append(DenseLayer(layers[-1],K=64,R=2))
+#layers.append(ConvLayer(layers[-1],stride=1,Ic=3,Jc=4,K=16,R=2))
 layers.append(UnsupFinalLayer(layers[-1],10))
 
 #init_v2(layers)
@@ -159,7 +164,7 @@ LIKl=likelihood(layers)
 for k in xrange(0):
 #	print tf.get_collection('latent')
         print "KL",session.run(KLl)
-#        session.run(updates_sigma)
+        session.run(updates_sigma)
         session.run(updates_v2)
 #        print session.run(layers[1].m)
         print "AFTER V",session.run(KLl)
@@ -194,18 +199,18 @@ for k in xrange(0):
 samples = sample(layers)
 
 
-for k in xrange(10):
+for k in xrange(300):
         print "KL",session.run(KLl)
-        session.run(updates_v2)
-        print "AFTER V",session.run(KLl)
         session.run(updates_sigma)
         print "AFTER S",session.run(KLl)
-        for i in xrange(2):
-                for l in xrange(1):
+        session.run(updates_v2)
+        print "AFTER V",session.run(KLl)
+        for i in xrange(4):
+                for l in xrange(2):
                         for k in permutation(layers[l+1].K).astype('int32'):
                                 session.run(updates_mk[l][k])
                                 print "AFTER M",l,k,session.run(KLl)
-                for l in xrange(1):
+                for l in xrange(2):
                         for k in permutation(layers[l+1].K).astype('int32'):
                                 session.run(updates_pk[l][k])
                                 print "AFTER P",l,k,session.run(KLl)
@@ -218,8 +223,8 @@ for k in xrange(10):
         print "AFTER pi",session.run(LIKl)
         session.run(updates_sigma)
         print "AFTER S",session.run(LIKl),session.run([layers[1].sigmas2,layers[2].sigmas2])
-        for i in xrange(2):
-                for l in xrange(1):
+        for i in xrange(4):
+                for l in xrange(2):
                         for k in permutation(layers[l+1].K).astype('int32'):
                                 session.run(updates_Wk[l][k])
                                 print "AFTER W",l,k,session.run(LIKl)
