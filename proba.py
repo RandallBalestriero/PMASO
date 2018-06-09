@@ -474,8 +474,8 @@ LIKELIHOOD = []
 
 
 for i in xrange(10):
-        all_p,all_m=Estep(XX,5)
-        Mstep(5)
+        all_p,all_m=Estep(XX,2)
+        Mstep(2)
 
 
 

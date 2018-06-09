@@ -3,14 +3,26 @@ from pylab import *
 import layers as layers_
 
 
-def init_latent(x,layers):
-	new_v = []
-	for i in xrange(len(layers)):
-		if(isinstance(layers[i],layers_.InputLayer)):
-                        new_v.append(tf.assign(layers[i].m,x))
-                else:
-                        new_v+=layers[i].init_latent()
-	return new_v
+
+def init_dataset(x,layers,y=None):
+	updates_op = []
+        updates_op.append(tf.assign(layers[0].m,x))
+        if(isinstance(layers[-1],layers_.SupFinalLayer)):
+                updates_op.append(tf.assign(layers[-1].p_,tf.expand_dims(tf.one_hot(y,layers[-1].R),0)))
+	return updates_op
+
+def init_theta(layers):
+	updates_op = []
+	for i in xrange(1,len(layers)):
+                updates_op+=layers[i].init_theta()
+	return updates_op
+
+def init_thetaq(layers):
+	updates_op = []
+	for i in xrange(1,len(layers)):
+                updates_op+=layers[i].init_thetaq()
+	return updates_op
+
 
 
 
@@ -20,89 +32,23 @@ def update_v2(layers):
                 v2+=l.update_v2()
         return v2
 
-
-def update_p(layers):
+def update_vmpk(layers):
         v2 = []
-#        for l in layers:
-        v2=layers[-1].update_p()
+        for l in layers[1:]:
+                v2+=[l.update_vmpk()]
         return v2
-
-
-
-def update_W(layers):
-        v2 = []
-#        for l in layers:
-        v2 =layers[-1].update_W()
-        return v2
-
-
-
-def update_m(layers):
-        v2 = []
-        for l in layers:
-                v2+=l.update_m()
-        return v2
-
-
-
-
-def update_pk(layers):
-        v2 = []
-        for l,i in zip(layers[1:-1],range(len(layers)-2)):
-                v2.append([])
-                for k in xrange(l.K):
-                    v2[i]+=l.update_pk(k)
-        return v2
-
-def update_mk(layers):
-        v2 = []
-        for l,i in zip(layers[1:-1],range(len(layers)-2)):
-                v2.append([])
-                for k in xrange(l.K):
-                    v2[i]+=l.update_mk(k)
-        return v2
-
 
 def update_Wk(layers):
         v2 = []
-        for l,i in zip(layers[1:-1],range(len(layers)-2)):
-                v2.append([])
-                for k in xrange(l.K):
-                    v2[i]+=l.update_Wk(k)
+        for l in layers[1:]:
+                v2+=l.update_Wk()
         return v2
-
-
-
-
-
-
-def update_W(layers):
-        v2 = []
-        v2=layers[-1].update_W()
-        return v2
-
-
-
-def update_m(layers):
-        v2 = []
-        for l in layers:
-                v2+=l.update_m()
-        return v2
-
-
-
-
-
-
-
-
 
 def update_sigma(layers):
         v2 = []
         for l in layers:
                 v2+=l.update_sigma()
         return v2
-
 
 def update_pi(layers):
         v2 = []
@@ -113,69 +59,50 @@ def update_pi(layers):
 
 
 
-
-
-
-
-
-def sample(layers):
-	s=float32(1)
-        for i in xrange(1,len(layers)):
-		s = layers[-i].sample(s)
-	return s
+def sample(layers,Ks=None,sigma=1):
+    """Ks is used if one wants to pre imposed some 
+    t variables at different layers, one can provide
+    a specific set of t for any layer but must be
+    of the same shape as the inner layer variable"""
+    if(Ks == None):
+        Ks = [None]*len(layers)
+    samples=0 # variables that carries the per layer samples representation going from layer to layer
+    for i in xrange(len(layers)-1,0,-1):
+	samples = layers[i].sample(samples,Ks[i],sigma)
+    return samples
 
 
 
 def sampletrue(layers):
-        s=float32(1)
-        return layers[1].backward()
+    s=float32(1)
+    try:
+        return layers[1].deconv()
+    except:
+        return layers[1].backward(0)
 
 
 def SSE(x,y):
-	return tf.reduce_sum(tf.pow(x-y,2))
+    return tf.reduce_sum(tf.square(x-y))
 	
 		
 
 
 def likelihood(layers):
-        like = 0
-        for l in layers:
-                like+=l.likelihood()
-    #	# FIRST LAYER
-#	like=0# a1+a2+a3+a4+a5
-#	for l in xrange(1,len(layers)-1):
-#	        a1 = -SSE(layers[l-1].M,layers[l].backward())/(2*layers[l].sigmas2[0])
-#		if(isinstance(layers[l],DenseLayer)):
-#	                k  = layers[l].bs*layers[l].D*(tf.log(layers[l].sigmas2[0]+eps)/2+tf.log(2*3.14159)/2)+tf.reduce_sum(layers[l].p*tf.expand_dims(tf.log(layers[l].pi+eps),0))
-#			a2 = tf.reduce_sum(layers[l].W*layers[l].W,axis=2)/(2*layers[l].sigmas2)+1/(2*layers[l+1].sigmas2)
-#		else:
-#	                k  = layers[l].bs*layers[l].D*(tf.log(layers[l].sigmas2[0]+eps)/2+tf.log(2*3.14159)/2)+tf.reduce_sum(layers[l].p*tf.reshape(tf.log(layers[l].pi+eps),(1,layers[l].K,layers[l].R,1,1)))
-#			a2 = tf.reshape(tf.transpose(tf.reduce_sum(layers[l].W*layers[l].W,axis=[1,2,3])),(1,layers[l].K,layers[l].R,1,1))
-#		a3 = tf.reduce_sum(a2*tf.reduce_sum((tf.pow(layers[l].m,2))*(tf.pow(layers[l].p,2)-layers[l].p),axis=0)/(2*layers[l].sigmas2[0]))
-#		like+=a1+a3+k#-tf.reduce_sum(layers[l].p)##tf.reduce_sum(tf.expand_dims(a2,0)*layers[l].p*layers[l].v2)
-#	l+=1
-#	# LAST LAYER
-#        k  = layers[l].bs*layers[l].D*(tf.log(layers[l].sigmas2+eps)/2+tf.log(2*3.14159)/2)+tf.reduce_sum(layers[l].p*tf.expand_dims(tf.log(layers[l].pi+eps),0))
-#        if(isinstance(layers[-2],DenseLayer)):
-#                a1 = -tf.reduce_sum(tf.reduce_sum(tf.pow(tf.expand_dims(layers[l-1].M,1)-tf.expand_dims(layers[l].W[0],0),2),axis=2)*layers[-1].p[:,0,:])/(2*layers[l].sigmas2)
-#        else:
-#                a1 = -tf.reduce_sum(tf.reduce_sum(tf.pow(tf.expand_dims(tf.reshape(layers[-2].M,(layers[l].bs,layers[-2].D)),1)-tf.expand_dims(layers[-1].W[0],0),2),axis=2)*layers[-1].p[:,0,:])/(2*layers[-1].sigmas2)                       
-#        like+=a1+k
-	return like
+    """ gather all the per layer likelihoods
+    and add them together as derived in the paper"""
+    like = 0
+    for l in layers:
+        like+=l.likelihood()
+    return like
 	
 
 def KL(layers):
-	kl = 0
-        for l in layers:
-                kl+=l.KL()
-#        for l in xrange(1,len(layers)-1):
-#	        kl += tf.reduce_sum(layers[l].p*(tf.log(layers[l].p+eps)-tf.log(layers[l].v2+eps)/2))
-#	kl += tf.reduce_sum(layers[-1].p*(tf.log(layers[-1].p+eps)))
-	return kl#likelihood(layers)-kl
-
-
-
-
+    """gather the KL divergence by
+    summing the per layers one as derived"""
+    kl = 0
+    for l in layers:
+        kl+=l.KL()
+    return kl
 
 
 
@@ -199,12 +126,201 @@ def get_v(layers):
 
 
 
+def load_data(DATASET):
+    if(DATASET=='MNIST'):
+        batch_size = 50
+        mnist         = fetch_mldata('MNIST original')
+        x             = mnist.data.reshape(70000,1,28,28).astype('float32')
+        y             = mnist.target.astype('int32')
+        x_train,x_test,y_train,y_test = train_test_split(x,y,test_size=10000,stratify=y)
+        input_shape   = (batch_size,28,28,1)
+#	x_train = transpose(x_train,[0,2,3,1])
+#	x_test  = transpose(x_test,[0,2,3,1])
+	c = 10
+        n_epochs = 150
+
+    elif(DATASET == 'CIFAR'):
+        batch_size = 50
+        TRAIN,TEST = load_cifar(3)
+        x_train,y_train = TRAIN
+        x_test,y_test     = TEST
+        input_shape       = (batch_size,32,32,3)
+        x_train = transpose(x_train,[0,2,3,1])
+        x_test  = transpose(x_test,[0,2,3,1])
+	c=10
+        n_epochs = 150
+
+    elif(DATASET == 'CIFAR100'):
+	batch_size = 100
+        TRAIN,TEST = load_cifar100(3)
+        x_train,y_train = TRAIN
+        x_test,y_test     = TEST
+        input_shape       = (batch_size,32,32,3)
+        x_train = transpose(x_train,[0,2,3,1])
+        x_test  = transpose(x_test,[0,2,3,1])
+        c=100
+        n_epochs = 200
+
+    elif(DATASET=='IMAGE'):
+	batch_size=200
+        x,y           = load_imagenet()
+	x = x.astype('float32')
+	y = y.astype('int32')
+        x_train,x_test,y_train,y_test = train_test_split(x,y,test_size=20000,stratify=y)
+        input_shape   = (batch_size,64,64,3)
+	c=200
+        n_epochs = 200
+
+    else:
+        batch_size = 50
+        TRAIN,TEST = load_svhn()
+        x_train,y_train = TRAIN
+        x_test,y_test     = TEST
+        input_shape       = (batch_size,32,32,3)
+        x_train = transpose(x_train,[0,2,3,1])
+        x_test  = transpose(x_test,[0,2,3,1])
+	c=10
+        n_epochs = 150
+  
+#    x_train          -= x_train.mean((1,2,3),keepdims=True)
+    x_train          /= abs(x_train).max((1,2,3),keepdims=True)#/10
+#    x_test           -= x_test.mean((1,2,3),keepdims=True)
+    x_test           /= abs(x_test).max((1,2,3),keepdims=True)
+    x_train           = x_train.astype('float32')
+    x_test            = x_test.astype('float32')
+    y_train           = array(y_train).astype('int32')
+    y_test            = array(y_test).astype('int32')
+    return x_train,y_train,x_test,y_test
 
 
-import cPickle
-import glob
-from sklearn.datasets import fetch_mldata
-from sklearn.cross_validation import train_test_split
+
+class model:
+    def __init__(self,layers):
+        self.layers    = layers
+        self.L         = len(layers)
+        self.x         = tf.placeholder(tf.float32,shape=layers[0].input_shape)
+        self.y         = tf.placeholder(tf.int32,shape=[layers[0].input_shape[0]]) # MIGHT NOT BE USED DEPENDING ON SETTING
+        self.sigma     = tf.placeholder(tf.float32)
+        session_config = tf.ConfigProto(allow_soft_placement=False,log_device_placement=True)
+        session_config.gpu_options.allow_growth=True
+        session        = tf.Session(config=session_config)
+        init           = tf.global_variables_initializer()
+        session.run(init)
+        self.session=session
+        ## INITIALIZATION
+        self.dataset_init_op = init_dataset(self.x,layers,self.y)
+        self.theta_inits_op  = init_theta(layers)
+        self.thetaq_inits_op = init_thetaq(layers)
+        ### GATHER UPDATES
+        self.updates_v2      = update_v2(layers)
+        self.updates_vmpk    = update_vmpk(layers)
+        self.updates_sigma   = update_sigma(layers)
+        self.updates_Wk      = update_Wk(layers)
+        self.updates_pi      = update_pi(layers)
+        ## GATHER LOSSES
+        self.KL              = KL(layers)
+        self.like            = likelihood(layers)
+        # GATHER SAMPLING
+        self.samples         = sample(layers,sigma=self.sigma)
+        self.samplet         = sampletrue(layers)
+    def init_theta(self):
+        self.session.run(self.theta_inits_op)
+    def init_dataset(self,x,y):
+        self.session.run(self.dataset_init_op,feed_dict={self.x:x,self.y:y})
+    def init_thetaq(self):
+        for op in self.thetaq_inits_op:
+            self.session.run(op)
+    def sample(self,sigma):
+        return self.session.run(self.samples,feed_dict={self.sigma:float32(sigma)})
+    def reconstruct(self):
+        return self.session.run(self.samplet)
+
+
+def train_model(model,rcoeff,CPT):
+    global_global_L = 0
+    cpt             = 0
+    LIKELIHOOD      = []
+    KL              = []
+    rcoeff          = 4000
+    L               = rcoeff*2
+    while((L-global_global_L)>rcoeff and cpt<CPT):
+        cpt+=1
+        global_global_L=model.session.run(model.like)
+        LIKELIHOOD.append(global_global_L)
+        print "CACA",global_global_L,model.session.run(model.KL)
+#        session.run(updates_sigma)
+#        L = session.run(LIKl)
+#        LIKELIHOOD.append(L)
+#        print "AFTER S",L
+#        session.run(updates_v2)
+#        print "AFTER V",session.run(KLl)
+        ########################################### E STEP
+        L        = rcoeff*2
+        global_L = 0
+        while((L-global_L)>rcoeff):
+            global_L = model.session.run(model.KL)
+            for l in xrange(model.L-1):
+                if(isinstance(model.layers[l+1],layers_.PoolLayer)):
+                    session.run(model.updates_vmpk[l])
+                    L = model.session.run(model.KL)
+                    print "AFTER POOL M",l,L
+                else:
+                    L = rcoeff*2
+                    prev_L = 0
+                    while((L-prev_L)>rcoeff):
+                        prev_L = model.session.run(model.KL)
+                        for kk in permutation(model.layers[l+1].K).astype('int32'):
+                            model.session.run(model.updates_vmpk[l],feed_dict={model.layers[l+1].k_:int32(kk)})
+                            L = model.session.run(model.KL)
+                            print "AFTER M",l,kk,L
+            if(isinstance(model.layers[-1],layers_.UnsupFinalLayer)):
+                model.session.run(model.updates_vmpk[-1])
+                L = model.session.run(model.KL)
+                print "AFTER LAST P",L
+            print L,">",global_L
+        ########################################### E STEP
+        L        = rcoeff*2
+        global_L = 0
+        while((L-global_L)>rcoeff):
+            global_L = model.session.run(model.like)
+            model.session.run(model.updates_pi)
+            L = model.session.run(model.like)
+            LIKELIHOOD.append(L)
+            print "AFTER pi",L
+            model.session.run(model.updates_sigma)
+            L = model.session.run(model.like)
+            LIKELIHOOD.append(L)
+            print "AFTER S",L,model.session.run([l.sigmas2 for l in model.layers[1:]])
+            for l in xrange(model.L-1):
+                if(isinstance(model.layers[l+1],layers_.PoolLayer)):
+                    0
+                else:
+                    L = rcoeff*2
+                    prev_L = 0
+                    while((L-prev_L)*rcoeff):
+                        prev_L = model.session.run(model.like)
+                        for kk in permutation(model.layers[l+1].K).astype('int32'):
+                            model.session.run(model.updates_Wk[l],feed_dict={model.layers[l+1].k_:int32(kk)})
+                            L = model.session.run(model.like)
+                            LIKELIHOOD.append(L)
+                            print "AFTER W",l,kk,L
+                            model.session.run(model.updates_sigma[l])
+                            L = model.session.run(model.like)
+                            LIKELIHOOD.append(L)
+                            print "AFTER S",L
+                    model.session.run(model.updates_Wk[-1])
+                    L = model.session.run(model.like)
+                    LIKELIHOOD.append(L)
+                    print "AFTER W",L
+            model.session.run(model.updates_sigma)
+            L = model.session.run(model.like)
+            LIKELIHOOD.append(L)
+            print "AFTER S",L,model.session.run([l.sigmas2 for l in model.layers[1:]])
+    return LIKELIHOOD,KL
+
+
+
+
 
 ###################################################################
 #
@@ -213,6 +329,15 @@ from sklearn.cross_validation import train_test_split
 #
 #
 ###################################################################
+
+
+
+import cPickle
+import glob
+from sklearn.datasets import fetch_mldata
+from sklearn.cross_validation import train_test_split
+
+
 
 def principal_components(x):
     x = x.transpose(0, 2, 3, 1)
@@ -330,35 +455,6 @@ def load_cifar100(channels=1):
 
 
 
-def train(x_train,y_train,x_test,y_test,session,train_opt,loss,accu,x,y_,test,name='caca',n_epochs=5):
-        n_train = x_train.shape[0]/batch_size
-        n_test  = x_test.shape[0]/batch_size
-        train_loss          = []
-        test_loss           = []
-        for e in xrange(n_epochs):
-                print 'epoch',e
-                for i in xrange(n_train):
-                        session.run(train_opt,feed_dict={x:x_train[batch_size*i:batch_size*(i+1)],y_:y_train[batch_size*i:batch_size*(i+1)],test:True})
-                        train_loss.append(session.run(loss,feed_dict={x:x_train[batch_size*i:batch_size*(i+1)],y_:y_train[batch_size*i:batch_size*(i+1)],test:True}))
-                acc1 = 0
-                acc2 = 0
-                for i in xrange(n_test):
-                        acc1+=session.run(accu,feed_dict={x:x_test[batch_size*i:batch_size*(i+1)],y_:y_test[batch_size*i:batch_size*(i+1)],test:False})
-                test_loss.append(acc1/n_test)
-		print test_loss[-1]
-	return train_loss,test_loss
-
-
-
-
-
-##################################################
-def compute_loss(logits, labels):
-	labels = tf.cast(labels, tf.int64)
-	cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=logits, name='cross_entropy')
-	cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-#	tf.add_to_collection('losses', cross_entropy_mean)
-	return cross_entropy_mean#tf.add_n(tf.get_collection('losses'), name='total_loss')
 
 
 
