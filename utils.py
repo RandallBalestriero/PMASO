@@ -3,6 +3,15 @@ from pylab import *
 import layers as layers_
 
 
+#############################################################################################
+#
+#
+#                   INITIALIZATION HELPER
+#
+#
+#############################################################################################
+
+
 
 def init_dataset(x,layers,y=None):
 	updates_op = []
@@ -23,7 +32,13 @@ def init_thetaq(layers):
                 updates_op+=layers[i].init_thetaq()
 	return updates_op
 
-
+#############################################################################################
+#
+#
+#                       UPDATE and SAMPLE HELPER
+#
+#
+#############################################################################################
 
 
 def update_v2(layers):
@@ -44,11 +59,26 @@ def update_Wk(layers):
                 v2+=l.update_Wk()
         return v2
 
-def update_sigma(layers):
+def update_sigma(layers,local=1):
+    if(local):
         v2 = []
         for l in layers:
-                v2+=l.update_sigma()
+            if(not isinstance(l,layers_.InputLayer)):
+                v2+=l.update_sigma(local)
         return v2
+    else:
+        v2   = 0.
+        accu = 0.
+        for l in layers:
+            if(not isinstance(l,layers_.InputLayer)):
+                v2+=l.update_sigma(local)
+                accu+=prod(l.input_shape)
+        update_ops = []
+        for l in layers:
+            if(not isinstance(l,layers_.InputLayer)):
+                update_ops.append(tf.assign(l.sigmas2,[v2/accu]))
+        return update_ops
+
 
 def update_pi(layers):
         v2 = []
@@ -126,6 +156,160 @@ def get_v(layers):
 
 
 
+
+
+class model:
+    def __init__(self,layers,local_sigma=1):
+        self.layers    = layers
+        self.local_sigma = local_sigma
+        self.L         = len(layers)
+        self.x         = tf.placeholder(tf.float32,shape=layers[0].input_shape)
+        self.y         = tf.placeholder(tf.int32,shape=[layers[0].input_shape[0]]) # MIGHT NOT BE USED DEPENDING ON SETTING
+        self.sigma     = tf.placeholder(tf.float32)
+        session_config = tf.ConfigProto(allow_soft_placement=False,log_device_placement=True)
+        session_config.gpu_options.allow_growth=True
+        session        = tf.Session(config=session_config)
+        init           = tf.global_variables_initializer()
+        session.run(init)
+        self.session=session
+        ## INITIALIZATION
+        self.dataset_init_op = init_dataset(self.x,layers,self.y)
+        self.theta_inits_op  = init_theta(layers)
+        self.thetaq_inits_op = init_thetaq(layers)
+        ### GATHER UPDATES
+        self.updates_v2      = update_v2(layers)
+        self.updates_vmpk    = update_vmpk(layers)
+        self.updates_sigma   = update_sigma(layers,local_sigma)
+        self.updates_Wk      = update_Wk(layers)
+        self.updates_pi      = update_pi(layers)
+        ## GATHER LOSSES
+        self.KL              = KL(layers)
+        self.like            = likelihood(layers)
+        # GATHER SAMPLING
+        self.samples         = sample(layers,sigma=self.sigma)
+        self.samplet         = sampletrue(layers)
+    def init_theta(self):
+        self.session.run(self.theta_inits_op)
+    def init_dataset(self,x,y):
+        self.session.run(self.dataset_init_op,feed_dict={self.x:x,self.y:y})
+    def init_thetaq(self):
+        for op in self.thetaq_inits_op:
+            self.session.run(op)
+    def init_params(self,random):
+        if(random):
+            return 0
+        for l in self.layers[1:]:
+            self.session.run(self.thetaW_inits_op[i])
+            self.session.run(self.thetaq_inits_op[i])
+            self.session.run(self.updates_pi[i])
+            if(self.local_sigma):
+                self.session.run(self.updates_sigma[i])
+        if(not self.local_sigma):
+            self.session.run(self.updates_sigma)
+    def sample(self,sigma):
+        return self.session.run(self.samples,feed_dict={self.sigma:float32(sigma)})
+    def reconstruct(self):
+        return self.session.run(self.samplet)
+
+
+def train_model(model,rcoeff,CPT):
+    global_global_L = 0
+    cpt             = 0
+    LIKELIHOOD      = []
+    KL              = []
+    L               = rcoeff*2
+    while((L-global_global_L)>rcoeff and cpt<CPT):
+        cpt+=1
+        global_global_L=model.session.run(model.like)
+        LIKELIHOOD.append(global_global_L)
+        print "CACA",global_global_L,model.session.run(model.KL)
+#        session.run(updates_sigma)
+#        L = session.run(LIKl)
+#        LIKELIHOOD.append(L)
+#        print "AFTER S",L
+#        session.run(updates_v2)
+#        print "AFTER V",session.run(KLl)
+        ########################################### E STEP
+        L        = rcoeff*2
+        global_L = 0
+        while((L-global_L)>rcoeff):
+            global_L = model.session.run(model.KL)
+            for l in xrange(model.L-1):
+                if(isinstance(model.layers[l+1],layers_.PoolLayer)):
+                    model.session.run(model.updates_vmpk[l])
+                    L = model.session.run(model.KL)
+                    print "AFTER POOL M",l,L
+                else:
+                    L = rcoeff*2
+                    prev_L = 0
+                    while((L-prev_L)>rcoeff):
+                        prev_L = model.session.run(model.KL)
+                        for kk in permutation(model.layers[l+1].K).astype('int32'):
+                            model.session.run(model.updates_vmpk[l],feed_dict={model.layers[l+1].k_:int32(kk)})
+                            L = model.session.run(model.KL)
+                            print "AFTER M",l,kk,L
+            if(isinstance(model.layers[-1],layers_.UnsupFinalLayer)):
+                model.session.run(model.updates_vmpk[-1])
+                L = model.session.run(model.KL)
+                print "AFTER LAST P",L
+            print (L-global_L),">",rcoeff
+        ########################################### E STEP
+        L        = rcoeff*2
+        global_L = 0
+        while((L-global_L)>rcoeff):
+            global_L = model.session.run(model.like)
+            model.session.run(model.updates_pi)
+            L = model.session.run(model.like)
+            LIKELIHOOD.append(L)
+            print "AFTER pi",L
+            model.session.run(model.updates_sigma)
+            L = model.session.run(model.like)
+            LIKELIHOOD.append(L)
+            print "AFTER S",L,model.session.run([l.sigmas2 for l in model.layers[1:]])
+            for l in xrange(model.L-1):
+                if(isinstance(model.layers[l+1],layers_.PoolLayer)):
+                    0
+                else:
+                    L = rcoeff*2
+                    prev_L = 0
+                    while((L-prev_L)*rcoeff):
+                        prev_L = model.session.run(model.like)
+                        for kk in permutation(model.layers[l+1].K).astype('int32'):
+                            model.session.run(model.updates_Wk[l],feed_dict={model.layers[l+1].k_:int32(kk)})
+                            L = model.session.run(model.like)
+                            LIKELIHOOD.append(L)
+                            print "AFTER W",l,kk,L
+            model.session.run(model.updates_Wk[-1])
+            L = model.session.run(model.like)
+            LIKELIHOOD.append(L)
+            print "AFTER W",L
+            model.session.run(model.updates_sigma)
+            L = model.session.run(model.like)
+            LIKELIHOOD.append(L)
+            print "AFTER S",L,model.session.run([l.sigmas2 for l in model.layers[1:]])
+    return LIKELIHOOD,KL
+
+
+
+
+
+###################################################################
+#
+#
+#                       UTILITY FOR CIFAR10 & MNIST
+#
+#
+###################################################################
+
+
+
+import cPickle
+import glob
+from sklearn.datasets import fetch_mldata
+from sklearn.cross_validation import train_test_split
+
+
+
 def load_data(DATASET):
     if(DATASET=='MNIST'):
         batch_size = 50
@@ -191,151 +375,6 @@ def load_data(DATASET):
     y_train           = array(y_train).astype('int32')
     y_test            = array(y_test).astype('int32')
     return x_train,y_train,x_test,y_test
-
-
-
-class model:
-    def __init__(self,layers):
-        self.layers    = layers
-        self.L         = len(layers)
-        self.x         = tf.placeholder(tf.float32,shape=layers[0].input_shape)
-        self.y         = tf.placeholder(tf.int32,shape=[layers[0].input_shape[0]]) # MIGHT NOT BE USED DEPENDING ON SETTING
-        self.sigma     = tf.placeholder(tf.float32)
-        session_config = tf.ConfigProto(allow_soft_placement=False,log_device_placement=True)
-        session_config.gpu_options.allow_growth=True
-        session        = tf.Session(config=session_config)
-        init           = tf.global_variables_initializer()
-        session.run(init)
-        self.session=session
-        ## INITIALIZATION
-        self.dataset_init_op = init_dataset(self.x,layers,self.y)
-        self.theta_inits_op  = init_theta(layers)
-        self.thetaq_inits_op = init_thetaq(layers)
-        ### GATHER UPDATES
-        self.updates_v2      = update_v2(layers)
-        self.updates_vmpk    = update_vmpk(layers)
-        self.updates_sigma   = update_sigma(layers)
-        self.updates_Wk      = update_Wk(layers)
-        self.updates_pi      = update_pi(layers)
-        ## GATHER LOSSES
-        self.KL              = KL(layers)
-        self.like            = likelihood(layers)
-        # GATHER SAMPLING
-        self.samples         = sample(layers,sigma=self.sigma)
-        self.samplet         = sampletrue(layers)
-    def init_theta(self):
-        self.session.run(self.theta_inits_op)
-    def init_dataset(self,x,y):
-        self.session.run(self.dataset_init_op,feed_dict={self.x:x,self.y:y})
-    def init_thetaq(self):
-        for op in self.thetaq_inits_op:
-            self.session.run(op)
-    def sample(self,sigma):
-        return self.session.run(self.samples,feed_dict={self.sigma:float32(sigma)})
-    def reconstruct(self):
-        return self.session.run(self.samplet)
-
-
-def train_model(model,rcoeff,CPT):
-    global_global_L = 0
-    cpt             = 0
-    LIKELIHOOD      = []
-    KL              = []
-    rcoeff          = 4000
-    L               = rcoeff*2
-    while((L-global_global_L)>rcoeff and cpt<CPT):
-        cpt+=1
-        global_global_L=model.session.run(model.like)
-        LIKELIHOOD.append(global_global_L)
-        print "CACA",global_global_L,model.session.run(model.KL)
-#        session.run(updates_sigma)
-#        L = session.run(LIKl)
-#        LIKELIHOOD.append(L)
-#        print "AFTER S",L
-#        session.run(updates_v2)
-#        print "AFTER V",session.run(KLl)
-        ########################################### E STEP
-        L        = rcoeff*2
-        global_L = 0
-        while((L-global_L)>rcoeff):
-            global_L = model.session.run(model.KL)
-            for l in xrange(model.L-1):
-                if(isinstance(model.layers[l+1],layers_.PoolLayer)):
-                    session.run(model.updates_vmpk[l])
-                    L = model.session.run(model.KL)
-                    print "AFTER POOL M",l,L
-                else:
-                    L = rcoeff*2
-                    prev_L = 0
-                    while((L-prev_L)>rcoeff):
-                        prev_L = model.session.run(model.KL)
-                        for kk in permutation(model.layers[l+1].K).astype('int32'):
-                            model.session.run(model.updates_vmpk[l],feed_dict={model.layers[l+1].k_:int32(kk)})
-                            L = model.session.run(model.KL)
-                            print "AFTER M",l,kk,L
-            if(isinstance(model.layers[-1],layers_.UnsupFinalLayer)):
-                model.session.run(model.updates_vmpk[-1])
-                L = model.session.run(model.KL)
-                print "AFTER LAST P",L
-            print L,">",global_L
-        ########################################### E STEP
-        L        = rcoeff*2
-        global_L = 0
-        while((L-global_L)>rcoeff):
-            global_L = model.session.run(model.like)
-            model.session.run(model.updates_pi)
-            L = model.session.run(model.like)
-            LIKELIHOOD.append(L)
-            print "AFTER pi",L
-            model.session.run(model.updates_sigma)
-            L = model.session.run(model.like)
-            LIKELIHOOD.append(L)
-            print "AFTER S",L,model.session.run([l.sigmas2 for l in model.layers[1:]])
-            for l in xrange(model.L-1):
-                if(isinstance(model.layers[l+1],layers_.PoolLayer)):
-                    0
-                else:
-                    L = rcoeff*2
-                    prev_L = 0
-                    while((L-prev_L)*rcoeff):
-                        prev_L = model.session.run(model.like)
-                        for kk in permutation(model.layers[l+1].K).astype('int32'):
-                            model.session.run(model.updates_Wk[l],feed_dict={model.layers[l+1].k_:int32(kk)})
-                            L = model.session.run(model.like)
-                            LIKELIHOOD.append(L)
-                            print "AFTER W",l,kk,L
-                            model.session.run(model.updates_sigma[l])
-                            L = model.session.run(model.like)
-                            LIKELIHOOD.append(L)
-                            print "AFTER S",L
-                    model.session.run(model.updates_Wk[-1])
-                    L = model.session.run(model.like)
-                    LIKELIHOOD.append(L)
-                    print "AFTER W",L
-            model.session.run(model.updates_sigma)
-            L = model.session.run(model.like)
-            LIKELIHOOD.append(L)
-            print "AFTER S",L,model.session.run([l.sigmas2 for l in model.layers[1:]])
-    return LIKELIHOOD,KL
-
-
-
-
-
-###################################################################
-#
-#
-#                       UTILITY FOR CIFAR10 & MNIST
-#
-#
-###################################################################
-
-
-
-import cPickle
-import glob
-from sklearn.datasets import fetch_mldata
-from sklearn.cross_validation import train_test_split
 
 
 

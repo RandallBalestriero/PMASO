@@ -12,31 +12,42 @@ DATASET = 'MNIST'
 x_train,y_train,x_test,y_test = load_data(DATASET)
 
 
-pp = permutation(x_train.shape[0])[:1550]
-XX = x_train[pp]+randn(len(pp),1,28,28)*0.05
+pp = permutation(x_train.shape[0])[:700]
+XX = x_train[pp]+randn(len(pp),1,28,28)*0.1
 YY = y_train[pp]
 
 XX = transpose(XX,[0,2,3,1])
 input_shape = XX.shape
 
-layers = [InputLayer(input_shape)]
-#layers.append(DenseLayer(layers[-1],K=64,R=2))
-layers.append(ConvLayer(layers[-1],stride=1,Ic=3,Jc=3,K=8,R=2))
-#layers.append(PoolLayer(layers[-1],2))
-layers.append(UnsupFinalLayer(layers[-1],10))
+layers1 = [InputLayer(input_shape)]
+layers1.append(DenseLayer(layers1[-1],K=32,R=2,nonlinearity=None))
+layers1.append(SupFinalLayer(layers1[-1],10))
+
+layers2 = [InputLayer(input_shape)]
+layers2.append(ConvLayer(layers2[-1],stride=1,Ic=3,Jc=3,K=32,R=2,nonlinearity=None))
+layers2.append(PoolLayer(layers2[-1],2))
+layers2.append(ConvLayer(layers2[-1],stride=1,Ic=3,Jc=3,K=32,R=2,nonlinearity=None))
+layers2.append(PoolLayer(layers2[-1],2))
+layers2.append(SupFinalLayer(layers2[-1],10))
+
+layers3 = [InputLayer(input_shape)]
+layers3.append(ConvLayer(layers3[-1],stride=1,Ic=5,Jc=5,K=32,R=2,nonlinearity=None))
+layers3.append(PoolLayer(layers3[-1],4))
+layers3.append(DenseLayer(layers3[-1],K=64,R=2,nonlinearity=None))
+layers3.append(SupFinalLayer(layers3[-1],10))
 
 
 
-model1 = model(layers)
-model1.init_theta()
+model1 = model(layers2,local_sigma=0)
 model1.init_dataset(XX,YY)
-model1.init_thetaq()
+model1.init_params(random=0)
+#model1.init_thetaq()
 
-LIKELIHOOD,KL = train_model(model1,1000,20)
+LIKELIHOOD,KL = train_model(model1,rcoeff=9999,CPT=15)
 
 figure()
 plot(LIKELIHOOD)
-
+plot(KL)
 U=model1.reconstruct()
 figure()
 for i in xrange(25):
