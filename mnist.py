@@ -13,7 +13,7 @@ x_train,y_train,x_test,y_test = load_data(DATASET)
 
 
 pp = permutation(x_train.shape[0])[:700]
-XX = x_train[pp]+randn(len(pp),1,28,28)*0.1
+XX = x_train[pp]+randn(len(pp),1,28,28)*0.001
 YY = y_train[pp]
 
 XX = transpose(XX,[0,2,3,1])
@@ -31,19 +31,19 @@ layers2.append(PoolLayer(layers2[-1],2))
 layers2.append(SupFinalLayer(layers2[-1],10))
 
 layers3 = [InputLayer(input_shape)]
-layers3.append(ConvLayer(layers3[-1],stride=1,Ic=5,Jc=5,K=32,R=2,nonlinearity=None))
-layers3.append(PoolLayer(layers3[-1],4))
+layers3.append(ConvLayer(layers3[-1],stride=1,Ic=3,Jc=3,K=8,R=2,nonlinearity=None))
+layers3.append(PoolLayer(layers3[-1],2))
 layers3.append(DenseLayer(layers3[-1],K=64,R=2,nonlinearity=None))
 layers3.append(SupFinalLayer(layers3[-1],10))
 
 
 
-model1 = model(layers2,local_sigma=0)
+model1 = model(layers3,local_sigma=0)
 model1.init_dataset(XX,YY)
-model1.init_params(random=0)
+model1.init_params(random=1)
 #model1.init_thetaq()
 
-LIKELIHOOD,KL = train_model(model1,rcoeff=9999,CPT=15)
+LIKELIHOOD,KL = train_model(model1,rcoeff=99,CPT=13)
 
 figure()
 plot(LIKELIHOOD)
@@ -59,8 +59,8 @@ for i in xrange(25):
 
 U=model1.sample(0)
 figure()
-for i in xrange(36):
-    subplot(6,6,1+i)
+for i in xrange(64):
+    subplot(8,8,1+i)
     imshow(U[i,:,:,0],aspect='auto')
     xticks([])
     yticks([])

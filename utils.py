@@ -20,10 +20,10 @@ def init_dataset(x,layers,y=None):
                 updates_op.append(tf.assign(layers[-1].p_,tf.expand_dims(tf.one_hot(y,layers[-1].R),0)))
 	return updates_op
 
-def init_theta(layers):
+def init_thetaW(layers):
 	updates_op = []
 	for i in xrange(1,len(layers)):
-                updates_op+=layers[i].init_theta()
+                updates_op+=layers[i].init_thetaW()
 	return updates_op
 
 def init_thetaq(layers):
@@ -174,7 +174,7 @@ class model:
         self.session=session
         ## INITIALIZATION
         self.dataset_init_op = init_dataset(self.x,layers,self.y)
-        self.theta_inits_op  = init_theta(layers)
+        self.thetaW_inits_op = init_thetaW(layers)
         self.thetaq_inits_op = init_thetaq(layers)
         ### GATHER UPDATES
         self.updates_v2      = update_v2(layers)
@@ -198,8 +198,9 @@ class model:
     def init_params(self,random):
         if(random):
             return 0
-        for l in self.layers[1:]:
-            self.session.run(self.thetaW_inits_op[i])
+        for i in xrange(self.L-1):
+            if(not isinstance(self.layers[i+1],layers_.PoolLayer)):
+                self.session.run(self.thetaW_inits_op[i])
             self.session.run(self.thetaq_inits_op[i])
             self.session.run(self.updates_pi[i])
             if(self.local_sigma):
@@ -238,7 +239,7 @@ def train_model(model,rcoeff,CPT):
                 if(isinstance(model.layers[l+1],layers_.PoolLayer)):
                     model.session.run(model.updates_vmpk[l])
                     L = model.session.run(model.KL)
-                    print "AFTER POOL M",l,L
+                    print "AFTER POOL M",l,L,
                 else:
                     L = rcoeff*2
                     prev_L = 0
@@ -272,17 +273,17 @@ def train_model(model,rcoeff,CPT):
                 else:
                     L = rcoeff*2
                     prev_L = 0
-                    while((L-prev_L)*rcoeff):
+                    while((L-prev_L)>rcoeff):
                         prev_L = model.session.run(model.like)
                         for kk in permutation(model.layers[l+1].K).astype('int32'):
                             model.session.run(model.updates_Wk[l],feed_dict={model.layers[l+1].k_:int32(kk)})
                             L = model.session.run(model.like)
                             LIKELIHOOD.append(L)
-                            print "AFTER W",l,kk,L
+                            print "AFTER W",l,kk,L,model.session.run(model.KL)
             model.session.run(model.updates_Wk[-1])
             L = model.session.run(model.like)
             LIKELIHOOD.append(L)
-            print "AFTER W",L
+            print "AFTER W",L,model.session.run(model.KL)
             model.session.run(model.updates_sigma)
             L = model.session.run(model.like)
             LIKELIHOOD.append(L)
