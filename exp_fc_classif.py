@@ -103,7 +103,7 @@ else:
 
 print accuracy
 
-f=open('EXP_CLASSIF/exp_fc_classif_'+str(rnnb)+'_'+str(nonlinearity)+'_'+str(neurons)+'_'+str(rnnb),'wb')
+f=open('EXP_CLASSIF/exp_fc_classif_'+str(rnnb)+'_'+str(nonlinearity)+'_'+str(neurons)+'_'+str(rnnb)+'.pkl','wb')
 cPickle.dump(accuracy,f)
 f.close()
 
