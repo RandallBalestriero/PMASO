@@ -1,36 +1,8 @@
 import tensorflow as tf
+import time
 from pylab import *
 import layers as layers_
 
-
-#############################################################################################
-#
-#
-#                   INITIALIZATION HELPER
-#
-#
-#############################################################################################
-
-
-
-def init_dataset(x,layers,y=None):
-	updates_op = []
-        updates_op.append(tf.assign(layers[0].m,x))
-        if(isinstance(layers[-1],layers_.SupFinalLayer)):
-                updates_op.append(tf.assign(layers[-1].p_,tf.expand_dims(tf.one_hot(y,layers[-1].R),0)))
-	return updates_op
-
-def init_thetaW(layers):
-	updates_op = []
-	for i in xrange(1,len(layers)):
-                updates_op+=layers[i].init_thetaW()
-	return updates_op
-
-def init_thetaq(layers):
-	updates_op = []
-	for i in xrange(1,len(layers)):
-                updates_op+=layers[i].init_thetaq()
-	return updates_op
 
 #############################################################################################
 #
@@ -40,24 +12,6 @@ def init_thetaq(layers):
 #
 #############################################################################################
 
-
-def update_v2(layers):
-        v2 = []
-        for l in layers:
-                v2+=l.update_v2()
-        return v2
-
-def update_vmpk(layers):
-        v2 = []
-        for l in layers[1:]:
-                v2+=[l.update_vmpk()]
-        return v2
-
-def update_Wk(layers):
-        v2 = []
-        for l in layers[1:]:
-                v2+=l.update_Wk()
-        return v2
 
 def update_sigma(layers,local=1):
     if(local):
@@ -76,17 +30,8 @@ def update_sigma(layers,local=1):
         update_ops = []
         for l in layers:
             if(not isinstance(l,layers_.InputLayer)):
-                update_ops.append(tf.assign(l.sigmas2,[v2/accu]))
+                update_ops.append(tf.assign(l.sigmas2,[tf.clip_by_value(v2/accu,0.001,10)]))
         return update_ops
-
-
-def update_pi(layers):
-        v2 = []
-        for l in layers:
-                v2+=l.update_pi()
-        return v2
-
-
 
 
 def sample(layers,Ks=None,sigma=1):
@@ -101,6 +46,19 @@ def sample(layers,Ks=None,sigma=1):
 	samples = layers[i].sample(samples,Ks[i],sigma)
     return samples
 
+def sampleclass(layers,K,sigma=1):
+    """Ks is used if one wants to pre imposed some 
+    t variables at different layers, one can provide
+    a specific set of t for any layer but must be
+    of the same shape as the inner layer variable"""
+    Ks  = [None]*(len(layers)-1)
+    pp = zeros((layers[-1].input_shape[0],1,layers[-1].R),dtype='float32')
+    pp[:,:,K]=1
+    Ks.append(pp)
+    samples=0 # variables that carries the per layer samples representation going from layer to layer
+    for i in xrange(len(layers)-1,0,-1):
+	samples = layers[i].sample(samples,Ks[i],sigma)
+    return samples
 
 
 def sampletrue(layers):
@@ -136,28 +94,6 @@ def KL(layers):
 
 
 
-def get_p(layers):
-	p=[]
-	for l in layers[1:]:
-		p.append(l.p)
-	return p
-
-def get_m(layers):
-        p=[]
-        for l in layers[1:]:
-                p.append(l.M)
-        return p
-
-def get_v(layers):
-        p=[]
-        for l in layers[1:]:
-                p.append(l.v2)
-        return p
-
-
-
-
-
 class model:
     def __init__(self,layers,local_sigma=1):
         self.layers    = layers
@@ -173,122 +109,152 @@ class model:
         session.run(init)
         self.session=session
         ## INITIALIZATION
-        self.dataset_init_op = init_dataset(self.x,layers,self.y)
-        self.thetaW_inits_op = init_thetaW(layers)
-        self.thetaq_inits_op = init_thetaq(layers)
+        self.initx = tf.assign(self.layers[0].m,self.x)
+        self.inity = tf.assign(self.layers[-1].p_,tf.expand_dims(tf.one_hot(self.y,self.layers[-1].R),0))
+#        self.thetaW_inits_op = init_thetaW(layers)
+        self.thetaq_inits_op = [l.init_thetaq() for l in layers[1:]]
         ### GATHER UPDATES
-        self.updates_v2      = update_v2(layers)
-        self.updates_vmpk    = update_vmpk(layers)
+        self.updates_vmpk    = [l.update_vmpk() for l in layers[1:]]
         self.updates_sigma   = update_sigma(layers,local_sigma)
-        self.updates_Wk      = update_Wk(layers)
-        self.updates_pi      = update_pi(layers)
+        self.updates_Wk      = [l.update_Wk() for l in layers[1:]]
+        self.updates_pi      = [l.update_pi() for l in layers[1:]]
         ## GATHER LOSSES
         self.KL              = KL(layers)
         self.like            = likelihood(layers)
         # GATHER SAMPLING
+        self.samplesclass     = [sampleclass(layers,k,sigma=self.sigma) for k in xrange(layers[-1].R)]
         self.samples         = sample(layers,sigma=self.sigma)
         self.samplet         = sampletrue(layers)
+        # CREATE INDICES
+        indices = []
+        for l,l_ in zip(layers[1:],range(self.L-1)):
+            indices.append([])
+            if(isinstance(l,layers_.PoolLayer) or isinstance(l,layers_.FinalLayer)):
+                indices[-1].append([l_])
+            elif(isinstance(l,layers_.DenseLayer)):
+                for k in xrange(l.K):
+                    indices[-1].append([l_,k])
+            elif(isinstance(l,layers_.ConvLayer)):
+                for i in xrange(l.I):
+                    for j in xrange(l.J):
+                        for k in xrange(l.K):
+                            indices[-1].append([l_,i,j,k])
+        self.indices = indices
+    def E_step(self,random=1,fineloss=1):
+        loss = []
+        for indices in self.indices[:len(self.indices)-self.hold_last_p]:      # EACH ITEM IS A LIST OF INDICES FOR EACH LAYER remove the last layer if y was given
+            if(random):
+                perm = permutation(len(indices))
+            else:
+                perm = range(len(indices))
+            for i in perm:
+                t=time.time()
+                if(len(indices[i])==1):   # POOL AND LAST LAYER
+                    self.session.run(self.updates_vmpk[indices[i][0]])
+                elif(len(indices[i])==2): # FULLY CONNECTED
+                    self.session.run(self.updates_vmpk[indices[i][0]],feed_dict={self.layers[indices[i][0]+1].k_:int32(indices[i][1])})
+                else:                     # CONV
+                    self.session.run(self.updates_vmpk[indices[i][0]],feed_dict={self.layers[indices[i][0]+1].i_:int32(indices[i][1]),self.layers[indices[i][0]+1].j_:int32(indices[i][2]),self.layers[indices[i][0]+1].k_:int32(indices[i][3])})
+                if(fineloss):
+                    L = self.session.run(self.KL)
+                    loss.append(L)
+                    print "E AFTER ",indices[i],L,time.time()-t
+        if(fineloss==0):
+            L = self.session.run(self.KL)
+            loss.append(L)
+        return loss
+    def M_step(self,random=1,fineloss=1):
+        loss = []
+        self.session.run(self.updates_pi)
+        if(fineloss):
+            L = self.session.run(self.like)
+            loss.append(L)
+        for l in xrange(self.L-2):
+            if(isinstance(self.layers[l+1],layers_.PoolLayer)):
+                pass
+            else:
+                if(random):
+                    perm = permutation(self.layers[l+1].K).astype('int32')
+                else:
+                    perm = range(self.layers[l+1].K)
+                for kk in perm:
+                    self.session.run(self.updates_Wk[l],feed_dict={self.layers[l+1].k_:int32(kk)})
+                    if(fineloss):
+                        L = self.session.run(self.like)
+                        loss.append(L)
+                        print "M AFTER W",l,kk,L
+        self.session.run(self.updates_Wk[-1])
+        if(fineloss):
+            L = self.session.run(self.like)
+            loss.append(L)
+            print "M AFTER LAST W",L
+        self.session.run(self.updates_sigma)
+        L = self.session.run(self.like)
+        loss.append(L)
+        print "M AFTER S",L,self.session.run([l.sigmas2 for l in self.layers[1:]])
+        return loss
+#
     def init_theta(self):
         self.session.run(self.theta_inits_op)
-    def init_dataset(self,x,y):
-        self.session.run(self.dataset_init_op,feed_dict={self.x:x,self.y:y})
+    def init_dataset(self,x,y=None):
+        self.session.run(self.initx,feed_dict={self.x:x})
+        if(y is not None):
+            self.session.run(self.inity,feed_dict={self.y:y})
+            self.hold_last_p = 1
+        else:
+            self.hold_last_p = 0
     def init_thetaq(self):
         for op in self.thetaq_inits_op:
             self.session.run(op)
-    def init_params(self,random):
+    def init_model(self,random):
         if(random):
             return 0
         for i in xrange(self.L-1):
             if(not isinstance(self.layers[i+1],layers_.PoolLayer)):
                 self.session.run(self.thetaW_inits_op[i])
             self.session.run(self.thetaq_inits_op[i])
-            self.session.run(self.updates_pi[i])
-            if(self.local_sigma):
-                self.session.run(self.updates_sigma[i])
-        if(not self.local_sigma):
-            self.session.run(self.updates_sigma)
     def sample(self,sigma):
         return self.session.run(self.samples,feed_dict={self.sigma:float32(sigma)})
+    def sampleclass(self,sigma,k):
+        return self.session.run(self.samplesclass[k],feed_dict={self.sigma:float32(sigma)})
     def reconstruct(self):
         return self.session.run(self.samplet)
+    def predict(self):
+        return self.session.run(self.layers[-1].p_)[0]
 
 
-def train_model(model,rcoeff,CPT):
+def train_model(model,rcoeff,CPT,random=0,fineloss=1):
     global_global_L = 0
     cpt             = 0
-    LIKELIHOOD      = []
-    KL              = []
+    LOSSES          = []
     L               = rcoeff*2
     while((L-global_global_L)>rcoeff and cpt<CPT):
-        cpt+=1
+        print cpt
+        cpt  += 1
+        lcpt  = 0
         global_global_L=model.session.run(model.like)
-        LIKELIHOOD.append(global_global_L)
-        print "CACA",global_global_L,model.session.run(model.KL)
-#        session.run(updates_sigma)
-#        L = session.run(LIKl)
-#        LIKELIHOOD.append(L)
-#        print "AFTER S",L
-#        session.run(updates_v2)
-#        print "AFTER V",session.run(KLl)
         ########################################### E STEP
         L        = rcoeff*2
         global_L = 0
-        while((L-global_L)>rcoeff):
-            global_L = model.session.run(model.KL)
-            for l in xrange(model.L-1):
-                if(isinstance(model.layers[l+1],layers_.PoolLayer)):
-                    model.session.run(model.updates_vmpk[l])
-                    L = model.session.run(model.KL)
-                    print "AFTER POOL M",l,L,
-                else:
-                    L = rcoeff*2
-                    prev_L = 0
-                    while((L-prev_L)>rcoeff):
-                        prev_L = model.session.run(model.KL)
-                        for kk in permutation(model.layers[l+1].K).astype('int32'):
-                            model.session.run(model.updates_vmpk[l],feed_dict={model.layers[l+1].k_:int32(kk)})
-                            L = model.session.run(model.KL)
-                            print "AFTER M",l,kk,L
-            if(isinstance(model.layers[-1],layers_.UnsupFinalLayer)):
-                model.session.run(model.updates_vmpk[-1])
-                L = model.session.run(model.KL)
-                print "AFTER LAST P",L
-            print (L-global_L),">",rcoeff
-        ########################################### E STEP
+        while((L-global_L)>rcoeff and lcpt<CPT/3):
+            LOSSES.append([[],'KL'])
+            global_L  = model.session.run(model.KL)
+            LOSSES[-1][0].append(model.E_step(random=random,fineloss=fineloss))
+            L = LOSSES[-1][0][-1][-1] # TAKE THE LAST KL VALUE
+            print "E",(L-global_L),">",rcoeff
+        ########################################### M STEP
         L        = rcoeff*2
         global_L = 0
-        while((L-global_L)>rcoeff):
+        lcpt     = 0
+        while((L-global_L)>rcoeff and lcpt<CPT):
+            LOSSES.append([[],'LIKE'])
+            lcpt+=1
             global_L = model.session.run(model.like)
-            model.session.run(model.updates_pi)
-            L = model.session.run(model.like)
-            LIKELIHOOD.append(L)
-            print "AFTER pi",L
-            model.session.run(model.updates_sigma)
-            L = model.session.run(model.like)
-            LIKELIHOOD.append(L)
-            print "AFTER S",L,model.session.run([l.sigmas2 for l in model.layers[1:]])
-            for l in xrange(model.L-1):
-                if(isinstance(model.layers[l+1],layers_.PoolLayer)):
-                    0
-                else:
-                    L = rcoeff*2
-                    prev_L = 0
-                    while((L-prev_L)>rcoeff):
-                        prev_L = model.session.run(model.like)
-                        for kk in permutation(model.layers[l+1].K).astype('int32'):
-                            model.session.run(model.updates_Wk[l],feed_dict={model.layers[l+1].k_:int32(kk)})
-                            L = model.session.run(model.like)
-                            LIKELIHOOD.append(L)
-                            print "AFTER W",l,kk,L,model.session.run(model.KL)
-            model.session.run(model.updates_Wk[-1])
-            L = model.session.run(model.like)
-            LIKELIHOOD.append(L)
-            print "AFTER W",L,model.session.run(model.KL)
-            model.session.run(model.updates_sigma)
-            L = model.session.run(model.like)
-            LIKELIHOOD.append(L)
-            print "AFTER S",L,model.session.run([l.sigmas2 for l in model.layers[1:]])
-    return LIKELIHOOD,KL
+            LOSSES[-1][0].append(model.M_step(random=random,fineloss=fineloss))
+            L = LOSSES[-1][0][-1][-1] # TAKE THE LAST LIKE VALUE
+            print "M",(L-global_L),">",rcoeff
+        print "GLOBAL",(L-global_global_L),">",rcoeff
+    return LOSSES
 
 
 
