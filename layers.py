@@ -240,9 +240,9 @@ class ConvLayer:
             if(random):
                 new_p       = tf.assign(self.p_,mysoftmax(tf.random_uniform((self.K,self.I,self.J,self.R,self.bs)),axis=3))
                 new_v       = tf.assign(self.v2_,tf.ones((self.K,self.I,self.J,self.bs)))
-                new_m       = tf.assign(self.m_,tf.ones((K,self.I,self.J,self.bs)))
+                new_m       = tf.assign(self.m_,tf.ones((self.K,self.I,self.J,self.bs)))
             else:
-                proj= tf.tensordot(self.input_patches,self.W,[[3,4,4],[2,3,4]]) # ( N I J K R )
+                proj= tf.tensordot(self.input_patches,self.W,[[3,4,5],[2,3,4]]) # ( N I J K R )
                 norms = tf.reshape(mynorm(self.W,axis=[2,3,4]),[1,1,1,self.K,self.R]) 
                 value  = mysoftmax(proj-0.5*norms,axis=4) # (N I J K R) 
                 new_p = tf.assign(self.p_,tf.transpose(value,[3,1,2,4,0]))
@@ -259,7 +259,7 @@ class ConvLayer:
                 p      = permutation(self.bs)[:self.K]
                 i      = randint(5,self.I-5,self.K)
                 j      = randint(5,self.J-5,self.K)
-                Xs     = tf.gather_nd(self.input_patches,stack([p,i,j]))
+                Xs     = tf.stack([self.input_patches[pp,ii,jj] for pp,ii,jj in zip(p,i,j)])#tf.gather_nd(self.input_patches,stack([p,i,j]))
                 if(self.nonlinearity=='relu' or self.nonlinearity=='abs'):
                     new_W  = tf.assign(self.W_,tf.expand_dims(Xs,1)+tf.random_normal((self.K,1,self.Ic,self.Jc,self.C))/float32(self.Ic*self.Jc*self.C))
                 else:
@@ -440,7 +440,7 @@ class PoolLayer:
                 new_m   = tf.assign(self.m_,tf.reduce_sum(patches*new_p,axis=4))
                 new_v       = tf.assign(self.v2_,tf.ones((self.C,self.bs,self.I,self.J)))
             return [new_m,new_p,new_v]
-        def init_W(self):
+        def init_W(self,random):
                 return [None]
 #                                           ---- BACKWARD OPERATOR ---- 
         def deconv(self,v=None):
