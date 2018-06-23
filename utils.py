@@ -109,10 +109,12 @@ class model:
         session.run(init)
         self.session=session
         ## INITIALIZATION
-        self.initx = tf.assign(self.layers[0].m,self.x)
-        self.inity = tf.assign(self.layers[-1].p_,tf.expand_dims(tf.one_hot(self.y,self.layers[-1].R),0))
-#        self.thetaW_inits_op = init_thetaW(layers)
-        self.thetaq_inits_op = [l.init_thetaq() for l in layers[1:]]
+        self.initx              = tf.assign(self.layers[0].m,self.x)
+        self.inity              = tf.assign(self.layers[-1].p_,tf.expand_dims(tf.one_hot(self.y,self.layers[-1].R),0))
+        self.initop_W_random       = [l.init_W(1) for l in layers[1:]]
+        self.initop_W              = [l.init_W(0) for l in layers[1:]]
+        self.initop_thetaq_random  = [l.init_thetaq(1) for l in layers[1:]]
+        self.initop_thetaq         = [l.init_thetaq(0) for l in layers[1:]]
         ### GATHER UPDATES
         self.updates_vmpk    = [l.update_vmpk() for l in layers[1:]]
         self.updates_sigma   = update_sigma(layers,local_sigma)
@@ -125,7 +127,7 @@ class model:
         self.samplesclass     = [sampleclass(layers,k,sigma=self.sigma) for k in xrange(layers[-1].R)]
         self.samples         = sample(layers,sigma=self.sigma)
         self.samplet         = sampletrue(layers)
-        # CREATE INDICES
+        # CREATE INDICES FOR CYCLING THE E STEP
         indices = []
         for l,l_ in zip(layers[1:],range(self.L-1)):
             indices.append([])
@@ -193,26 +195,49 @@ class model:
         loss.append(L)
         print "M AFTER S",L,self.session.run([l.sigmas2 for l in self.layers[1:]])
         return loss
-#
-    def init_theta(self):
-        self.session.run(self.theta_inits_op)
     def init_dataset(self,x,y=None):
+        """this function initializes the variable of the
+        first layer with x and possibly the last layer
+        with y. Depending if y is given or not, an extra variable
+        is updated that will impact the E-step. If no y is given the E step
+        is done also on the last layer, to infer the p values"""
         self.session.run(self.initx,feed_dict={self.x:x})
         if(y is not None):
             self.session.run(self.inity,feed_dict={self.y:y})
             self.hold_last_p = 1
         else:
             self.hold_last_p = 0
-    def init_thetaq(self):
-        for op in self.thetaq_inits_op:
-            self.session.run(op)
-    def init_model(self,random):
+    def init_thetaq(self,random):
+        """this function is used alone when for example testing
+        the model on a new dataset (using init_dataset),
+        then the parameters of the model are kept as the 
+        trained ones but one aims at correct initialization 
+        of the Q fistribution parameters. 
+        For initialization of the whole model see the below fun"""
         if(random):
-            return 0
-        for i in xrange(self.L-1):
+            for op in self.initop_thetaq:
+                self.session.run(op)
+        else:
+            for op in self.initop_thetaq_random:
+                self.session.run(op)
+    def init_model(self,random):
+        """this function is used the first time the model is created
+        and after having used the init dataset function, this will
+        allow to init W and thetaq as in the paper"""
+        if(random):
+            return 0 # nothing to do, already done in the class constructor
+        for i in xrange(self.L-1): # loop over layers
             if(not isinstance(self.layers[i+1],layers_.PoolLayer)):
-                self.session.run(self.thetaW_inits_op[i])
-            self.session.run(self.thetaq_inits_op[i])
+                if(random):
+                    self.session.run(self.initop_W_random[i])
+                else:
+                    self.session.run(self.initop_W[i])
+            if(not (isinstance(self.layers[i+1],layers_.FinalLayer) and self.hold_last_p==1)):
+                print "IN"
+                if(random):
+                    self.session.run(self.initop_thetaq_random[i])
+                else:
+                    self.session.run(self.initop_thetaq[i])
     def sample(self,sigma):
         return self.session.run(self.samples,feed_dict={self.sigma:float32(sigma)})
     def sampleclass(self,sigma,k):

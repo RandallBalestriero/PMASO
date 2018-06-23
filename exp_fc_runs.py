@@ -14,7 +14,7 @@ DATASET = 'MNIST'
 number = int(sys.argv[-1])
 random = int(sys.argv[-2])
 K = int(sys.argv[-3])
-
+init = int(sys.argv[-4])
 
 x_train,y_train,x_test,y_test = load_data(DATASET)
 
@@ -34,12 +34,12 @@ layers1.append(FinalLayer(layers1[-1],10))
 
 model1 = model(layers1,local_sigma=0)
 model1.init_dataset(XX,YY)
-model1.init_model(random=1)
+model1.init_model(random=init)
 
-LOSSES         = train_model(model1,rcoeff=50,CPT=25,random=random)
+LOSSES         = train_model(model1,rcoeff=50,CPT=50,random=random)
 ALL.append(LOSSES)
 
-f=open('BASE_EXP/exp_fc_run'+str(random)+'_'+str(K)+'_'+str(number)+'.pkl','wb')
+f=open('BASE_EXP/exp_fc_run'+str(init)+'_'+str(random)+'_'+str(K)+'_'+str(number)+'.pkl','wb')
 cPickle.dump(ALL,f)
 f.close()
 

@@ -86,19 +86,19 @@ class DenseLayer:
                 proj  = tf.tensordot(self.input_,self.W,[[1],[2]]) # (N K R)
                 norms = tf.reshape(mynorm(self.W,axis=2),[1,self.K,self.R])
                 new_p = tf.assign(self.p_,tf.transpose(mysoftmax(proj-0.5*norms),[1,0,2]))
-                new_m = tf.assign(self.m_,tf.reduce_sum(tf.transpose(proj,[1,0,2])*new_p,2)/(1+tf.reduce_sum(tf.transpose(norms,[1,0,2])*new_p,2)))
+                new_m = tf.assign(self.m_,tf.reduce_sum(tf.transpose(proj,[1,0,2])*new_p,2)/(tf.reduce_sum(tf.transpose(norms,[1,0,2])*new_p,2)))
                 new_v       = tf.assign(self.v2_,tf.ones((self.K,self.bs)))
                 return [new_m,new_p,new_v]
-        def init_thetaW(self,random):
+        def init_W(self,random):
             if(random):
-                if(self.nonlinearity=='abs' or self.nonlinearty=='relu'):
+                if(self.nonlinearity=='abs' or self.nonlinearity=='relu'):
                     new_W  = tf.assign(self.W_,tf.random_normal((self.K,1,self.D_in))/(self.D_in))
                 else:
                     new_W  = tf.assign(self.W_,tf.random_normal((self.K,self.R,self.D_in))/(self.D_in))
             else:
                 p      = permutation(self.bs)[:self.K]
                 Xs     = tf.gather(self.input_,p)
-                if(self.nonlinearity=='abs' or self.nonlinearty=='relu'):
+                if(self.nonlinearity=='abs' or self.nonlinearity=='relu'):
                     new_W  = tf.assign(self.W_,tf.expand_dims(Xs,1)+tf.random_normal((self.K,1,self.D_in))/float32(self.D_in))
                 else:
                     new_W  = tf.assign(self.W_,tf.concat([tf.expand_dims(Xs,1)+tf.random_normal((self.K,1,self.D_in))/float32(self.D_in) for r in xrange(self.R)],axis=1))
@@ -247,17 +247,20 @@ class ConvLayer:
                 value  = mysoftmax(proj-0.5*norms,axis=4) # (N I J K R) 
                 new_p = tf.assign(self.p_,tf.transpose(value,[3,1,2,4,0]))
                 new_v       = tf.assign(self.v2_,tf.ones((self.K,self.I,self.J,self.bs)))
-                new_m       = tf.assign(self.m_,tf.reduce_sum(new_p*tf.transpose(proj,[3,1,2,4,0]),3)/(1+tf.reduce_sum(new_p*tf.transpose(norms,[3,0,1,4,2]),3)))#tf.ones((self.K,self.I,self.J,self.bs)))
+                new_m       = tf.assign(self.m_,tf.reduce_sum(new_p*tf.transpose(proj,[3,1,2,4,0]),3)/(tf.reduce_sum(new_p*tf.transpose(norms,[3,0,1,4,2]),3)))#tf.ones((self.K,self.I,self.J,self.bs)))
             return [new_m,new_p,new_v]
-        def init_thetaW(self,random):
+        def init_W(self,random):
             if(random):
-                new_W  = tf.assign(self.W,)
+                if(self.nonlinearity=='relu' or self.nonlinearity=='abs'):
+                    new_W  = tf.assign(self.W_,tf.random_normal((self.K,1,self.Ic,self.Jc,self.C))/float32(self.Ic*self.Jc*self.C))
+                else:
+                    new_W  = tf.assign(self.W_,tf.random_normal((self.K,self.R,self.Ic,self.Jc,self.C))/float32(self.Ic*self.Jc*self.C))
             else:
                 p      = permutation(self.bs)[:self.K]
                 i      = randint(5,self.I-5,self.K)
                 j      = randint(5,self.J-5,self.K)
                 Xs     = tf.gather_nd(self.input_patches,stack([p,i,j]))
-                if(self.nonlinearity=='relu' or nonlinearity=='abs'):
+                if(self.nonlinearity=='relu' or self.nonlinearity=='abs'):
                     new_W  = tf.assign(self.W_,tf.expand_dims(Xs,1)+tf.random_normal((self.K,1,self.Ic,self.Jc,self.C))/float32(self.Ic*self.Jc*self.C))
                 else:
                     w=tf.concat([tf.expand_dims(Xs,1)+tf.random_normal((self.K,1,self.Ic,self.Jc,self.C))/float32(self.Ic*self.Jc*self.C) for r in xrange(self.R)],axis=1)
@@ -424,12 +427,20 @@ class PoolLayer:
                 w      = tf.expand_dims(tf.transpose(self.W,[1,2,0]),2)
                 self.deconv_ = lambda z: tf.concat([tf.nn.conv2d_backprop_input([self.bs,self.Iin,self.Jin,1],w,z[:,:,:,c,:],[1,self.stride,self.stride,1],"VALID") for c in xrange(self.C)],axis=3)
 #                                           ----  INITIALIZER    ----
-        def init_thetaq(self):
+        def init_thetaq(self,random):
+            if(random):
                 new_p       = tf.assign(self.p_,mysoftmax(tf.random_uniform((self.C,self.bs,self.I,self.J,self.R)),axis=4))
                 new_v       = tf.assign(self.v2_,tf.ones((self.C,self.bs,self.I,self.J)))
                 new_m       = tf.assign(self.m_,tf.ones((self.C,self.bs,self.I,self.J)))
-                return [new_m,new_p,new_v]
-        def init_thetaW(self):
+            else:
+                patches = tf.transpose(self.input_,[5,0,1,2,3,4]) # (C N I J Ic Jc)
+                patches = tf.reshape(patches,[self.C,self.bs,self.I,self.J,self.Ic*self.Jc]) # (C N I J R)
+                p       = mysoftmax(patches,axis=-1)
+                new_p   = tf.assign(self.p_,p)
+                new_m   = tf.assign(self.m_,tf.reduce_sum(patches*new_p,axis=4))
+                new_v       = tf.assign(self.v2_,tf.ones((self.C,self.bs,self.I,self.J)))
+            return [new_m,new_p,new_v]
+        def init_W(self):
                 return [None]
 #                                           ---- BACKWARD OPERATOR ---- 
         def deconv(self,v=None):
@@ -590,13 +601,13 @@ class FinalLayer:
                     norms = tf.reshape(mynorm(self.W,axis=2),[1,self.K,self.R])
                     new_p = tf.assign(self.p_,tf.transpose(mysoftmax(proj-0.5*norms),[1,0,2]))
                 return [new_p]
-        def init_thetaW(self,random):
+        def init_W(self,random):
                 if(random):
-                    new_W  = tf.assign(self.W,tf.random_normal((1,R,self.D_in))/(self.D_in))
+                    new_W  = tf.assign(self.W,tf.random_normal((1,self.R,self.D_in))/(self.D_in))
                 else:
                     p      = permutation(self.bs)[:self.R]
                     Xs     = tf.gather(self.input_,p)
-                    new_W  = tf.assign(self.W,Xs)
+                    new_W  = tf.assign(self.W,tf.expand_dims(Xs,0))
                 return [new_W]
         def backward(self,flat=1):
 		if(flat):

@@ -95,13 +95,13 @@ close()
 
 
 figure(figsize=(15,3))
-for i in xrange(10):
-    subplot(2,10,i+1)
-    imshow(reshape(W[i,0],(28,28)),aspect='auto',cmap='Greys',interpolation='nearest')
+for i in xrange(8):
+    subplot(2,8,i+1)
+    imshow(reshape(W[i,0],(3,3)),aspect='auto',cmap='Greys',interpolation='nearest')
     xticks([])
     yticks([])
-    subplot(2,10,i+11)
-    imshow(reshape(W[i,1],(28,28)),aspect='auto',cmap='Greys',interpolation='nearest')
+    subplot(2,8,i+9)
+    imshow(reshape(W[i,1],(3,3)),aspect='auto',cmap='Greys',interpolation='nearest')
     xticks([])
     yticks([])
 
