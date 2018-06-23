@@ -35,7 +35,7 @@ layers1.append(DenseLayer(layers1[-1],K=K,R=2,nonlinearity=None))
 layers1.append(FinalLayer(layers1[-1],10))
 
 model1 = model(layers1,local_sigma=0)
-if(supservised==1):
+if(supervised==1):
     model1.init_dataset(XX,YY)
 else:
     model1.init_dataset(XX)
