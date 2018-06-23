@@ -14,9 +14,9 @@ DATASET = 'MNIST'
 number = int(sys.argv[-1])
 random = int(sys.argv[-2])
 K = int(sys.argv[-3])
-init = int(sys.argv[-4])
-supervised = int(sys.argv[-5])
-
+init = int(sys.argv[-5])
+supervised = int(sys.argv[-6])
+only_thetaq=int(sys.argv[-4])
 
 
 x_train,y_train,x_test,y_test = load_data(DATASET)
@@ -39,13 +39,14 @@ if(supservised==1):
     model1.init_dataset(XX,YY)
 else:
     model1.init_dataset(XX)
-model1.init_model(random=init)
+
+model1.init_model(random=init,only_thetaq=only_thetaq)
 
 LOSSES         = train_model(model1,rcoeff=50,CPT=50,random=random)
 ALL.append(LOSSES)
 
 #f=open('BASE_EXP/exp_fc_run'+str(supervised)+'_'+str(init)+'_'+str(random)+'_'+str(K)+'_'+str(number)+'.pkl','wb')
-f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_fc_run'+str(supervised)+'_'+str(init)+'_'+str(random)+'_'+str(K)+'_'+str(number)+'.pkl','wb')
+f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_fc_run'+str(supervised)+'_'+str(init)+'_'+str(only_thetaq)+'_'+str(random)+'_'+str(K)+'_'+str(number)+'.pkl','wb')
 cPickle.dump(ALL,f)
 f.close()
 

@@ -220,14 +220,14 @@ class model:
         else:
             for op in self.initop_thetaq_random:
                 self.session.run(op)
-    def init_model(self,random):
+    def init_model(self,random,only_thetaq=0):
         """this function is used the first time the model is created
         and after having used the init dataset function, this will
         allow to init W and thetaq as in the paper"""
         if(random):
             return 0 # nothing to do, already done in the class constructor
         for i in xrange(self.L-1): # loop over layers
-            if(not isinstance(self.layers[i+1],layers_.PoolLayer)):
+            if((not isinstance(self.layers[i+1],layers_.PoolLayer)) and only_thetaq==0):
                 if(random):
                     self.session.run(self.initop_W_random[i])
                 else:
