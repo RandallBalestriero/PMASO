@@ -3,7 +3,7 @@ import tensorflow as tf
 from sklearn.datasets import make_moons
 from sklearn.datasets import load_digits
 import tensorflow as tf
-
+from sklearn.neighbors import KNeighborsClassifier
 from layers import *
 from utils import *
 
@@ -42,19 +42,38 @@ XX = x_train[:N]
 YY = y_train[:N]
 input_shape = XX.shape
 
-if(mode==1):
+if(mode==0):
+    means = asarray([reshape((XX[YY==c]).mean(0),(1,-1)) for c in xrange(10)])
+    xflat1= reshape(x_train,(1,len(x_train),-1))
+    xflat2= reshape(x_test,(1,len(x_test),-1))
+    yhat1 = argmin(((means-xflat1)**2).sum(2),0)
+    yhat2 = argmin(((means-xflat2)**2).sum(2),0)
+    train = mean((yhat1[:len(XX)]==y_train[:len(XX)]).astype('float32'))
+    accuracy = []
+    for i in xrange(1,len(x_train)/len(XX)):
+	accuracy.append(mean((yhat1[len(XX)*i:(i+1)*len(XX)]==y_train[len(XX)*i:(i+1)*len(XX)]).astype('float32')))
+    for i in xrange(len(x_test)/len(XX)):
+        accuracy.append(mean((yhat2[len(XX)*i:(i+1)*len(XX)]==y_test[len(XX)*i:(i+1)*len(XX)]).astype('float32')))
+    accuracy= mean(accuracy)
+elif(mode==1):
     layers1 = [InputLayer(input_shape)]
-    layers1.append(DenseLayer(layers1[-1],K=neurons,R=2,nonlinearity=nonlinearity,sparsity_prior=0.1))
+    layers1.append(DenseLayer(layers1[-1],K=neurons,R=2,nonlinearity=nonlinearity,sparsity_prior=0.))
     layers1.append(FinalLayer(layers1[-1],10))
     model1   = model(layers1,local_sigma=0)
     model1.init_dataset(XX,YY)
-    model1.init_thetaq()
-    model1.init_dataset(XX,YY)
     LOSSES   = train_model(model1,rcoeff=50,CPT=50,random=1,fineloss=0)
     accuracy = [] 
+    model1.init_dataset(x_train[:len(XX)])
+    model1.init_thetaq(random=1)
+    for j in xrange(50):
+        model1.E_step(random=1,fineloss=0)
+        yhat=model1.predict()
+        print mean((argmax(yhat,1)==y_train[:len(XX)]).astype('float32'))
+    yhat=model1.predict()
+    train=mean((argmax(yhat,1)==y_train[:len(XX)]).astype('float32'))
     for i in xrange(1,len(x_train)/len(XX)):
         model1.init_dataset(x_train[len(XX)*i:(i+1)*len(XX)])
-        model1.init_thetaq()
+        model1.init_thetaq(random=1)
         for j in xrange(50):
             model1.E_step(random=1,fineloss=0)
             yhat=model1.predict()
@@ -63,15 +82,15 @@ if(mode==1):
         accuracy.append(mean((argmax(yhat,1)==y_train[len(XX)*i:(i+1)*len(XX)]).astype('float32')))
     for i in xrange(len(x_test)/len(XX)):
         model1.init_dataset(x_test[len(XX)*i:(i+1)*len(XX)])
-        model1.init_thetaq()
+        model1.init_thetaq(random=1)
         for j in xrange(50):
             model1.E_step(random=1,fineloss=0)
         yhat=model1.predict()
         accuracy.append(mean((argmax(yhat,1)==y_test[len(XX)*i:(i+1)*len(XX)]).astype('float32')))
     accuracy=mean(accuracy)
 else:
-    lr=0.0001
-    batch_size=50
+    lr=0.001
+    batch_size=len(XX)
     x=tf.placeholder(shape=[batch_size,28,28,1],dtype=tf.float32)
     y=tf.placeholder(shape=[batch_size],dtype=tf.int32)
 #    h1 = tf.layers.dense(tf.layers.flatten(x),neurons)
@@ -91,17 +110,18 @@ else:
     learner     = tf.train.AdamOptimizer(lr)
     updates     = learner.minimize(loss)
     init        = tf.initialize_all_variables()
-    n_epochs    = 50
+    n_epochs    = 100
     session_config = tf.ConfigProto(allow_soft_placement=False,log_device_placement=True)
     session_config.gpu_options.allow_growth=True
     session        = tf.Session(config=session_config)
     session.run(init)
     for n in xrange(n_epochs):
         trainit(XX,YY,batch_size)
+    train    = mean(equal(predict(x_train[:len(XX)],batch_size),y_train[:len(XX)]).astype('float32'))
     accuracy = mean(equal(concatenate([predict(x_train[len(XX):],batch_size),predict(x_test,batch_size)],axis=0),concatenate([y_train[len(XX):],y_test],axis=0)).astype('float32'))
 
 
-print accuracy
+print train,accuracy
 
 f=open('EXP_CLASSIF/exp_fc_classif_'+str(rnnb)+'_'+str(nonlinearity)+'_'+str(neurons)+'_'+str(rnnb)+'.pkl','wb')
 cPickle.dump(accuracy,f)

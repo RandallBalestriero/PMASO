@@ -1,0 +1,21 @@
+# FOR EXPERIMENTING THE RUNS CNN
+./exp_cnn_runs.sh 3 0
+./exp_cnn_runs.sh 3 1
+./exp_cnn_runs.sh 5 0
+./exp_cnn_runs.sh 5 1
+
+# FOR EXPERIMENTING THE RUNS FC
+./exp_cnn_runs.sh 0 0
+./exp_cnn_runs.sh 0 1
+./exp_cnn_runs.sh 1 0
+./exp_cnn_runs.sh 1 1
+
+# FOR JUST FC
+./exp_fc.sh
+
+# FOR JUST CNN 
+./exp_cnn.sh 0 3#  first is supervised second is model number then is 
+./exp_cnn.sh 0 5
+./exp_cnn.sh 1 3
+./exp_cnn.sh 1 5
+

@@ -18,14 +18,14 @@ x_train,y_train,x_test,y_test = load_data(DATASET)
 
 
 pp = permutation(x_train.shape[0])[:10000]
-XX = x_train[pp]*1+randn(len(pp),1,28,28)*0
+XX = x_train[pp]+randn(len(pp),1,28,28)*0.0
 YY = y_train[pp]
 
 XX = transpose(XX,[0,2,3,1])
 input_shape = XX.shape
 
 layers1 = [InputLayer(input_shape)]
-layers1.append(DenseLayer(layers1[-1],K=neurons,R=2,nonlinearity=None,sparsity_prior=0.00))
+layers1.append(DenseLayer(layers1[-1],K=neurons,R=2,nonlinearity=None))
 layers1.append(FinalLayer(layers1[-1],10))
 
 model1 = model(layers1,local_sigma=0)
@@ -35,17 +35,10 @@ if(unsup):
 else:
     model1.init_dataset(XX,YY)
 
+LOSSES,timing  = train_model(model1,rcoeff=50,CPT=50,random=1,return_time=1,fineloss=1)
 
-LOSSES  = train_model(model1,rcoeff=50,CPT=50,random=1,fineloss=0)
-reconstruction = model1.reconstruct()[:150]
-samplesclass1  = [model1.sampleclass(1,k) for k in xrange(10)]
-samples1       = model1.sample(1)
-
-W = model1.session.run(model1.layers[1].W)
-b = model1.session.run(model1.layers[1].b)
-
-f=open('BASE_EXP/exp_fc_'+str(unsup)+'_'+str(neurons)+'.pkl','wb')
-cPickle.dump([LOSSES,reconstruction,XX[:150],samplesclass1,samples1,W,b],f)
+f=open('timing_'+str(neurons)+'.pkl','wb')
+cPickle.dump(timing,f)
 f.close()
 
 
