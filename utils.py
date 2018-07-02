@@ -193,7 +193,9 @@ class model:
                 elif(len(indices[i])==2): # FULLY CONNECTED
                     self.session.run(self.updates_vmpk[indices[i][0]],feed_dict={self.layers[indices[i][0]+1].k_:int32(indices[i][1])})
                 else:                     # CONV
+#		    print self.session.run(self.layers[1].m_)[int32(indices[i][3]),int32(indices[i][1])::3,int32(indices[i][2])::3]
                     self.session.run(self.updates_vmpk[indices[i][0]],feed_dict={self.layers[indices[i][0]+1].i_:int32(indices[i][1]),self.layers[indices[i][0]+1].j_:int32(indices[i][2]),self.layers[indices[i][0]+1].k_:int32(indices[i][3])})
+#		    print "AFTER",self.session.run(self.layers[1].m_)[int32(indices[i][3]),int32(indices[i][1])::3,int32(indices[i][2])::3]
                 newtime = time.time()-t
                 if(fineloss):
                     t=time.time()
