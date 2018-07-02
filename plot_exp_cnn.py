@@ -53,7 +53,7 @@ def plotclasses(classes):
 
 
 
-f=open('BASE_EXP/exp_cnn.pkl','rb')
+f=open('BASE_EXP/exp_cnn_sup1_1_3.pkl','rb')
 LOSSES,reconstruction,x,samplesclass1,samples1,W=cPickle.load(f)
 f.close()
 

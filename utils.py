@@ -35,7 +35,7 @@ def update_sigma(layers,local=1):
         update_ops = []
         for l in layers:
             if(not isinstance(l,layers_.InputLayer)):
-                update_ops.append(tf.assign(l.sigmas2,[tf.clip_by_value(v2/accu,0.0005,10)]))
+                update_ops.append(tf.assign(l.sigmas2,[tf.clip_by_value(v2/accu,0.000000005,10)]))
         return update_ops
 
 
@@ -109,7 +109,7 @@ class model:
         self.sigma     = tf.placeholder(tf.float32)
         # CREATE DN LOSS FOR INIT
         self.dn_loss    = tf.losses.softmax_cross_entropy(tf.one_hot(self.y,10),self.layers[-1].dn_p_logits[:,0,:]) # TAKE THE LAST ONE AS ONE NEURON
-        learner         = tf.train.AdamOptimizer(0.0001)
+        learner         = tf.train.AdamOptimizer(0.005)
         self.dn_updates = learner.minimize(self.dn_loss)
         # INIT SESSION
         session_config = tf.ConfigProto(allow_soft_placement=False,log_device_placement=True)
@@ -127,6 +127,7 @@ class model:
         self.initop_thetaq         = [l.init_thetaq(0) for l in layers[1:]]
         ### GATHER UPDATES
         self.updates_vmpk    = [l.update_vmpk() for l in layers[1:]]
+	self.update_last_pop = layers[-1].update_p()
         self.updates_sigma_global = update_sigma(layers,0)
         self.updates_sigma_local  = update_sigma(layers,1)
         self.updates_Wk      = [l.update_Wk() for l in layers[1:]]
@@ -141,7 +142,7 @@ class model:
         self.samplet         = sampletrue(layers)
         # CREATE INDICES FOR CYCLING THE E STEP
         indices = []
-        for l,l_ in zip(layers[1:],range(self.L-1)):
+        for l,l_ in zip(layers[1:-1],range(self.L-2)):
             indices.append([])
             if(isinstance(l,layers_.PoolLayer) or isinstance(l,layers_.FinalLayer)):
                 indices[-1].append([l_])
@@ -149,8 +150,8 @@ class model:
                 for k in xrange(l.K):
                     indices[-1].append([l_,k])
             elif(isinstance(l,layers_.ConvLayer)):
-                for i in xrange(l.I):
-                    for j in xrange(l.J):
+                for i in xrange(l.Ic):
+                    for j in xrange(l.Jc):
                         for k in xrange(l.K):
                             indices[-1].append([l_,i,j,k])
         self.indices = indices#[i for j in indices for i in j]
@@ -179,12 +180,13 @@ class model:
 #            loss.append(L)
 #        return loss
         loss = []
-        for indices in self.indices[:len(self.indices)-self.hold_last_p]:      # EACH ITEM IS A LIST OF INDICES FOR EACH LAYER remove the last layer if y was given
+        for indices in self.indices[:len(self.indices)]:      # EACH ITEM IS A LIST OF INDICES FOR EACH LAYER remove the last layer if y was given
             if(random):
                 perm = permutation(len(indices))
             else:
                 perm = range(len(indices))
             for i in perm:
+#		print self.session.run(self.layers[1].p_)
                 t=time.time()
                 if(len(indices[i])==1):   # POOL AND LAST LAYER
                     self.session.run(self.updates_vmpk[indices[i][0]])
@@ -198,9 +200,16 @@ class model:
                     L = self.session.run(self.KL)
                     loss.append(L)
                     print "E AFTER ",indices[i],L,'KL',time.time()-t,'update',newtime
-        if(fineloss==0):
-            L = self.session.run(self.KL)
-            loss.append(L)
+	if(self.hold_last_p==0):
+	        self.session.run(self.update_last_pop)
+	        if(fineloss):
+	            L = self.session.run(self.KL)
+	            loss.append(L)
+	            print "E (p) AFTER LAST",L
+	self.session.run(self.updates_vmpk[-1])
+        L = self.session.run(self.KL)
+        loss.append(L)
+        print "E (mv) AFTER LAST",L
         return loss
     def M_step(self,random=1,fineloss=1,local=0):
         loss = []
@@ -225,28 +234,31 @@ class model:
                         L = self.session.run(self.like)
                         loss.append(L)
                         print "M AFTER W",l,kk,L,'likelihood',time.time()-t,'update',newtime
+		        self.session.run(self.updates_b[l])
+		        if(fineloss):
+		            L = self.session.run(self.like)
+		            loss.append(L)
+		            print "M AFTER B",L
         self.session.run(self.updates_Wk[-1])
         if(fineloss):
             L = self.session.run(self.like)
             loss.append(L)
             print "M AFTER LAST W",L
-        self.session.run(self.updates_b)
+        self.session.run(self.updates_b[-1])
         if(fineloss):
             L = self.session.run(self.like)
             loss.append(L)
-            print "M AFTER B",L
+            print "M AFTER LAST B",L
 	if(local==0):
         	self.session.run(self.updates_sigma_global)
         	L = self.session.run(self.like)
         	loss.append(L)
-        	print "M AFTER S",L,self.session.run([l.sigmas2 for l in self.layers[1:]])
+        	print "M AFTER S",L,self.session.run([l.sigmas2 for l in self.layers[1:]]),self.session.run(self.layers[-1].next_sigmas2)
 	else:
 	        self.session.run(self.updates_sigma_local)
         	L = self.session.run(self.like)
         	loss.append(L)
-        	print "M AFTER S",L,self.session.run([l.sigmas2 for l in self.layers[1:]])
-        L = self.session.run(self.like)
-        loss.append(L)
+        	print "M AFTER S",L,self.session.run([l.sigmas2 for l in self.layers[1:]]),self.session.run(self.layers[-1].next_sigmas2)
         return loss
     def init_dataset(self,x,y=None):
         """this function initializes the variable of the
@@ -291,19 +303,21 @@ class model:
         return self.session.run(self.layers[-1].p_)[0]
 
 
-def train_model(model,rcoeff,CPT,random=0,fineloss=1,return_time=0):
+def train_model(model,rcoeff,CPT,random=0,fineloss=1,return_time=0,return_infos=0):
     global_global_L = 0
     cpt             = 0
     LOSSES          = []
     L               = rcoeff*2
     inittime=time.time()
     timings = []
-    while((L-global_global_L)>rcoeff and cpt<CPT):
+    SIGMAS  = []
+    LAST_M = []
+    print "INIT",model.session.run(model.KL),model.session.run(model.like)
+    while(cpt<CPT):
         print cpt
         newtime = time.time()
         cpt  += 1
         lcpt  = 0
-        global_global_L=model.session.run(model.like)
         ########################################### E STEP
         L        = rcoeff*2
         global_L = 0
@@ -314,22 +328,28 @@ def train_model(model,rcoeff,CPT,random=0,fineloss=1,return_time=0):
             L = LOSSES[-1][0][-1][-1] # TAKE THE LAST KL VALUE
             print "E",(L-global_L),">",rcoeff
         ########################################### M STEP
+        global_global_L=model.session.run(model.like)
         L        = rcoeff*2
         global_L = 0
         lcpt     = 0
+	SIGMAS.append(model.session.run([l.sigmas2 for l in model.layers[1:]]+[model.layers[-1].next_sigmas2]))
+	LAST_M.append(model.session.run(model.layers[-1].next_m))
         while((L-global_L)>rcoeff and lcpt<CPT):
             LOSSES.append([[],'LIKE'])
             lcpt+=1
             global_L = model.session.run(model.like)
-            LOSSES[-1][0].append(model.M_step(random=random,fineloss=fineloss,local=0))
+            LOSSES[-1][0].append(model.M_step(random=random,fineloss=fineloss,local=1))
             L = LOSSES[-1][0][-1][-1] # TAKE THE LAST LIKE VALUE
             print "M",(L-global_L),">",rcoeff
         print "GLOBAL",(L-global_global_L),">",rcoeff
         timings.append(time.time()-newtime)
     print "TRAINING DONE IN ",time.time()-inittime
+    TORETURN = [LOSSES]
     if(return_time):
-        return LOSSES,timings
-    return LOSSES
+        TORETURN+=[timings]
+    if(return_infos):
+	TORETURN+=[SIGMAS,LAST_M]
+    return TORETURN
 
 
 

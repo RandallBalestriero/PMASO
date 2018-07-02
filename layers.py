@@ -47,13 +47,13 @@ class DenseLayer:
                 self.K       = K
                 # PARAMETERS
                 if(nonlinearity is None):
-		    self.W_  = tf.Variable(tf.random_normal((K,R,self.D_in))/(self.D_in),trainable=True)
+		    self.W_  = tf.Variable(tf.random_normal((K,R,self.D_in),0,1),trainable=True)
                     self.W = self.W_
                 elif(nonlinearity == 'relu'):
-                    self.W_  = tf.Variable(tf.random_normal((K,1,self.D_in))/(self.D_in),trainable=True)
+                    self.W_  = tf.Variable(tf.random_normal((K,1,self.D_in))/sqrt(self.D_in),trainable=True)
                     self.W   = tf.concat([self.W_,tf.zeros_like(self.W_)],axis=1)
                 elif(nonlinearity=='abs'):
-                    self.W_  = tf.Variable(tf.random_normal((K,1,self.D_in))/(self.D_in),trainable=True)
+                    self.W_  = tf.Variable(tf.random_normal((K,1,self.D_in))/sqrt(self.D_in),trainable=True)
                     self.W   = tf.concat([self.W_,-self.W_],axis=1)
                 self.pi_     = 3.14159
 		self.pi      = tf.Variable(mysoftmax(tf.random_normal((K,R))),trainable=False)
@@ -62,7 +62,7 @@ class DenseLayer:
 		self.b_      = tf.Variable(tf.zeros((self.D_in)),trainable=True)
                 self.b       = tf.expand_dims(self.b_,0)
 		self.bb      = tf.reshape(self.b_,self.input_shape[1:])
-		self.m_      = tf.Variable(tf.ones((K,self.bs)),trainable=False)
+		self.m_      = tf.Variable(tf.random_normal((K,self.bs)),trainable=False)
                 self.m       = tf.transpose(self.m_)
                 self.p_      = tf.Variable(mysoftmax(tf.random_normal((K,self.bs,R)),axis=2),trainable=False) # convenient dimension ordering for fast updates shape: (D^{(\ell)},N,R^{(\ell)})
                 self.p       = tf.transpose(self.p_,[1,0,2])                            # variable for $[p^{(\ell)}_n]_{d,r} of shape (N,D^{(\ell)},R^{(\ell)})$
@@ -96,7 +96,7 @@ class DenseLayer:
                 if(self.nonlinearity=='abs' or self.nonlinearity=='relu'):
                     new_W  = tf.assign(self.W_,tf.expand_dims(Xs,1)+tf.random_normal((self.K,1,self.D_in))/float32(self.D_in))
                 else:
-                    new_W  = tf.assign(self.W_,tf.concat([tf.expand_dims(Xs,1)+tf.random_normal((self.K,1,self.D_in))/float32(self.D_in) for r in xrange(self.R)],axis=1))
+                    new_W  = tf.assign(self.W_,tf.concat([tf.expand_dims(Xs,1)*0.9+0.1*tf.random_normal((self.K,1,self.D_in))/float32(self.D_in) for r in xrange(self.R)],axis=1))
             return [new_W]
 #                                           ---- BACKWARD OPERATOR ---- 
         def backward(self,flat=1):
@@ -137,12 +137,12 @@ class DenseLayer:
                 # UPDATE P
                 prior   = tf.expand_dims(self.pi[k],0)
                 m2v2    = -tf.expand_dims(tf.square(self.m_[k])+self.v2_[k],-1)*tf.expand_dims(mynorm(self.W[k],1),0) # ( N R )
-                V       = mysoftmax(proj*tf.expand_dims(self.m_[k],-1)/self.sigmas2[0]+m2v2/(2*self.sigmas2[0])+tf.log(prior),coeff=0.01)
+                V       = mysoftmax(proj*tf.expand_dims(self.m_[k],-1)/self.sigmas2[0]+m2v2/(2*self.sigmas2[0])+tf.log(prior+0.0000001),coeff=0.0001)
                 new_p   = tf.scatter_update(self.p_,[k],[V])
                 # UPDATE V
-                value   = tf.reduce_sum(new_p[k]*tf.expand_dims(mynorm(self.W[k],1),0),1)
+                value   = tf.tensordot(new_p[k],mynorm(self.W[k],1),[[1],[0]])
                 value_  = 1/(self.next_layer.sigmas2[0]+eps)+value/(eps+self.sigmas2[0])
-                new_v2  = tf.scatter_update(self.v2_,[k],[tf.clip_by_value(1/value_,0.01,10000)])
+                new_v2  = tf.scatter_update(self.v2_,[k],[tf.clip_by_value(1/value_,0.000000001,1000000000000)])#0.001
                 # UPDATE M 
                 priorm  = self.next_layer.backward()[:,k]+self.next_layer.b_[k] # ( N )
                 coeff   = self.next_layer.sigmas2[0]/self.sigmas2[0]
@@ -155,14 +155,15 @@ class DenseLayer:
                 a2      = tf.reduce_sum(tf.square(self.m)*mynorm(tf.reduce_sum(tf.expand_dims(self.W,0)*tf.expand_dims(self.p,-1),2),2))
                 value   = -(rec+a1+a3+a2)
                 if(local):
-                    new_sigmas2 = tf.assign(self.sigmas2,[tf.clip_by_value(value/float32(prod(self.input_shape)),0.0001,10)])
+                    new_sigmas2 = tf.assign(self.sigmas2,[tf.clip_by_value(value/float32(prod(self.input_shape)),0.00001,10)])
                     return [new_sigmas2]
                 else:
                     return value
         def update_pi(self):
                 a44     = tf.reduce_mean(self.p,axis=0)
-                pi_ = a44/tf.reduce_sum(eps+a44,axis=1,keepdims=True)
-                new_pi  = tf.assign(self.pi,pi_)
+                pi_ = a44/tf.reduce_sum(eps+a44,axis=1,keepdims=True)+0.
+                pip_ = pi_/tf.reduce_sum(pi_,axis=1,keepdims=True)
+                new_pi  = tf.assign(self.pi,pip_)
                 return [new_pi]
         def update_Wk(self):
                 k       = self.k_
@@ -180,9 +181,12 @@ class DenseLayer:
                     new_w       = tf.scatter_nd_update(self.W_,[[k,0]],[numerator/(self.sparsity_prior+denominator)])
                 return [new_w]
         def update_b(self):
-                P = self.input_-self.backward(1)
-                new_b = tf.assign(self.b_,tf.reduce_mean(P,axis=[0]))
-                return [new_b]
+		if(1):
+                	P = self.input_-self.backward(1)
+                	new_b = tf.assign(self.b_,tf.reduce_mean(P,axis=[0]))
+                	return [new_b]
+		else:
+			return []
 
 
 
@@ -208,19 +212,19 @@ class ConvLayer:
                 self.input_patches = tf.reshape(tf.extract_image_patches(self.input,(1,self.Ic,self.Jc,1),(1,stride,stride,1),(1,1,1,1),"VALID"),(self.bs,self.I,self.J,self.Ic,self.Jc,self.C))
                 self.pi_     = 3.14159
                 if(nonlinearity is None):
-		    self.W_  = tf.Variable(tf.random_normal((self.K,self.R,self.Ic,self.Jc,self.C))/float32(self.Ic*self.Jc*self.C))# (K,R,Ic,Jc,C) always D_in last
+		    self.W_  = tf.Variable(tf.random_normal((self.K,self.R,self.Ic,self.Jc,self.C)))# (K,R,Ic,Jc,C) always D_in last
                     self.W   = self.W_
                 elif(nonlinearity=='relu'):
-                    self.W_  = tf.Variable(tf.random_normal((self.K,1,self.Ic,self.Jc,self.C))/float32(self.Ic*self.Jc*self.C))# (K,R,Ic,Jc,C) always D_in last
+                    self.W_  = tf.Variable(tf.random_normal((self.K,1,self.Ic,self.Jc,self.C)))# (K,R,Ic,Jc,C) always D_in last
                     self.W   = tf.concat([self.W_,tf.zeros_like(self.W_)],axis=1)
                 elif(nonlinearity=='abs'):
-                    self.W_  = tf.Variable(tf.random_normal((self.K,1,self.Ic,self.Jc,self.C))/float32(self.Ic*self.Jc*self.C))# (K,R,Ic,Jc,C) always D_in last
+                    self.W_  = tf.Variable(tf.random_normal((self.K,1,self.Ic,self.Jc,self.C)))# (K,R,Ic,Jc,C) always D_in last
                     self.W   = tf.concat([self.W_,-self.W_],axis=1) 
 		self.pi      = tf.Variable(mysoftmax(tf.random_uniform((K,R)),axis=1))
 		self.sigmas2 = tf.Variable(tf.ones(1))
                 self.b_      = tf.Variable(tf.zeros((self.C)))
                 self.b       = tf.reshape(self.b_,[1,1,1,self.C])
-		self.m_      = tf.Variable(tf.ones((K,self.I,self.J,self.bs)))#tf.concat(self.mk,axis=3) # (bs,I,J,K)
+		self.m_      = tf.Variable(tf.random_normal((K,self.I,self.J,self.bs)))#tf.concat(self.mk,axis=3) # (K,I,J,N)
                 self.m       = tf.transpose(self.m_,[3,1,2,0])
 		self.p_      = tf.Variable(mysoftmax(tf.random_uniform((K,self.I,self.J,self.R,self.bs)),axis=3))# (K,I,J,R,N)
                 self.p       = tf.transpose(self.p_,[4,1,2,0,3])
@@ -229,7 +233,15 @@ class ConvLayer:
                 input_layer.next_layer = self
                 # PREPARE THE DECONV OPERATION
                 self.deconv_ = lambda v:tf.add_n([tf.nn.conv2d_backprop_input(self.input_shape,tf.transpose(self.W[:,r],[1,2,3,0]),v[r],[1,self.s,self.s,1],"VALID") for r in xrange(self.R)])
-                self.minideconv_ = lambda v:tf.add_n([tf.nn.conv2d_backprop_input([self.input_shape[0],self.Ic+2*(self.Ic-1),self.Jc+2*(self.Jc-1),self.input_shape[3]],tf.transpose(self.W[:,r],[1,2,3,0]),v[r],[1,1,1,1],"VALID") for r in xrange(self.R)])
+#                self.minideconv_ = lambda v:tf.add_n([tf.nn.conv2d_backprop_input([self.input_shape[0],self.Ic+2*(self.Ic-1),self.Jc+2*(self.Jc-1),self.input_shape[3]],tf.transpose(self.W[:,r],[1,2,3,0]),v[r],[1,1,1,1],"VALID") for r in xrange(self.R)])
+#                self.deconv_ = lambda v:tf.reduce_sum(tf.map_fn(lambda r:tf.nn.conv2d_backprop_input(self.input_shape,tf.transpose(self.W[:,r],[1,2,3,0]),v[r],[1,self.s,self.s,1],"VALID"),tf.range(self.R),dtype=tf.float32,back_prop=False),axis=0)
+		xx = tf.random_normal((self.input_shape[0],self.Ic,self.Jc,self.input_shape[3]))
+		xxpadded = tf.pad(xx,[[0,0],[self.Ic-1,self.Ic-1],[self.Jc-1,self.Jc-1],[0,0]])
+                xxpatch  = tf.reshape(tf.extract_image_patches(xxpadded,(1,self.Ic,self.Jc,1),(1,stride,stride,1),(1,1,1,1),"VALID"),(self.bs,2*self.Ic-1,2*self.Jc-1,self.Ic,self.Jc,self.C))
+#		txxpatch = tf.concat([tf.expand_dims(xxpatch,0),tf.expand_dims(xxpatch,0)],axis=0)
+		self.myback   = lambda u:tf.gradients(xxpatch,xx,u)[0]
+#                self.minideconv_ = lambda v:tf.reduce_sum(tf.map_fn(lambda r:tf.nn.conv2d_backprop_input([self.input_shape[0],self.Ic+2*(self.Ic-1),self.Jc+2*(self.Jc-1),self.input_shape[3]],tf.transpose(self.W[:,r],[1,2,3,0]),v[r],[1,1,1,1],"VALID"),tf.range(self.R),dtype=tf.float32,back_prop=False),axis=0)
+		self.minideconv_ = lambda v:self.myback(tf.reduce_sum(tf.map_fn(lambda r:tf.tensordot(v[r],self.W[:,r],[[3],[0]]),tf.range(self.R),dtype=tf.float32,back_prop=False),axis=0))##tf.reduce_sum(tf.map_fn(lambda r:self.myback(tf.tensordot(v[r],self.W[:,r],[[3],[0]])),tf.range(self.R),dtype=tf.float32,back_prop=False),axis=0)
                 self.k_ = tf.placeholder(tf.int32)
                 self.i_ = tf.placeholder(tf.int32)
                 self.j_ = tf.placeholder(tf.int32)
@@ -244,7 +256,7 @@ class ConvLayer:
             if(random):
                 new_p       = tf.assign(self.p_,mysoftmax(tf.random_uniform((self.K,self.I,self.J,self.R,self.bs)),axis=3))
                 new_v       = tf.assign(self.v2_,tf.ones((self.K,self.I,self.J,self.bs)))
-                new_m       = tf.assign(self.m_,tf.ones((self.K,self.I,self.J,self.bs)))
+                new_m       = tf.assign(self.m_,tf.random_normal((self.K,self.I,self.J,self.bs)))
             else:
                 new_p   = tf.assign(self.p_,tf.transpose(self.dn_p,[3,1,2,4,0]))
                 new_m   = tf.assign(self.m_,tf.transpose(self.dn_output,[3,1,2,0]))
@@ -253,9 +265,9 @@ class ConvLayer:
         def init_W(self,random):
             if(random):
                 if(self.nonlinearity=='relu' or self.nonlinearity=='abs'):
-                    new_W  = tf.assign(self.W_,tf.random_normal((self.K,1,self.Ic,self.Jc,self.C))/float32(self.Ic*self.Jc*self.C))
-                else:
-                    new_W  = tf.assign(self.W_,tf.random_normal((self.K,self.R,self.Ic,self.Jc,self.C))/float32(self.Ic*self.Jc*self.C))
+                    new_W  = tf.assign(self.W_,tf.random_normal((self.K,1,self.Ic,self.Jc,self.C)))
+		else:
+                    new_W  = tf.assign(self.W_,tf.random_normal((self.K,self.R,self.Ic,self.Jc,self.C)))
             else:
                 p      = permutation(self.bs)[:self.K]
                 i      = randint(5,self.I-5,self.K)
@@ -279,8 +291,9 @@ class ConvLayer:
         def minideconvmijk(self,i,j,k):
                 #valid when using with patch (i,j)
                 mask = 1-tf.reshape(tf.one_hot(self.Ic-1,2*self.Ic-1),(1,2*self.Ic-1,1,1,1))*tf.reshape(tf.one_hot(self.Jc-1,self.Jc*2-1),(1,1,self.Jc*2-1,1,1))*tf.reshape(tf.one_hot(k,self.K),(1,1,1,self.K,1))
-                v         = tf.pad(tf.expand_dims(self.m,-1)*self.p,[[0,0],[self.Ic-1,self.Ic-1],[self.Jc-1,self.Jc-1],[0,0],[0,0]],'CONSTANT')[:,i:i+self.Ic*2-1,j:j+2*self.Jc-1] # (N I J K R)
-                return self.minideconv_(tf.transpose(v*mask,[4,0,1,2,3]))[:,self.Ic-1:2*self.Ic-1,self.Jc-1:2*self.Jc-1]
+#		A=tf.cond(tf.greater(i,,lambda :tf.expand_dims(self.m,-1)*self.p,lambda : tf.zeros((self.R,self.bs,self.Ic*2-1,self.Jc*2-1,self.C)))
+                v         = tf.expand_dims(self.m[:,10-self.Ic+1:10+self.Ic,10-self.Jc+1:10+self.Jc],-1)*self.p[:,10-self.Ic+1:10+self.Ic,10-self.Jc+1:10+self.Jc]#tf.pad(tf.expand_dims(self.m,-1)*self.p,[[0,0],[self.Ic-1,self.Ic-1],[self.Jc-1,self.Jc-1],[0,0],[0,0]],'CONSTANT')[:,i:i+self.Ic*2-1,j:j+2*self.Jc-1] # (N I J K R)
+                return self.minideconv_(tf.transpose(v*mask,[4,0,1,2,3]))#[:,self.Ic-1:2*self.Ic-1,self.Jc-1:2*self.Jc-1]
 	def backward(self):
                 return tf.tensordot(tf.expand_dims(self.m,-1)*self.p,self.W,[[3,4],[0,1]])#(N,I,J,Ic,Jc,C)
         def backwardmk(self,k):
@@ -312,7 +325,7 @@ class ConvLayer:
         def KL(self):
                 return self.likelihood()-tf.reduce_sum(self.p*(tf.log(self.p)))+tf.reduce_sum(tf.log(2*self.pi_*self.v2)/2)
         def update_v2(self):# DONE
-                value  = tf.reduce_sum(tf.reshape(mynorm(self.W,[2,3,4]),(self.K,1,1,self.R,1))*self.p_,axis=3)# (K,I,J,bs)
+                value  = tf.tensordot(mynorm(self.W,[2,3,4]),self.p_,[[1],[3]])# (K,I,J,bs)
                 v2     = 1/self.next_layer.sigmas2[0]+value/self.sigmas2[0]
                 new_v2 = tf.assign(self.v2_,1/v2)
                 return [new_v2]
@@ -320,30 +333,69 @@ class ConvLayer:
                 i      = self.i_
                 j      = self.j_
                 k      = self.k_
+		Ni     = tf.cast(tf.ceil((self.I-tf.cast(i,tf.float32))/self.Ic),tf.int32)
+		Nj     = tf.cast(tf.ceil((self.J-tf.cast(j,tf.float32))/self.Jc),tf.int32)
+                xi,yi   = tf.meshgrid(tf.range(j,self.J,self.Jc),tf.range(i,self.I,self.Ic)) # THE SECOND IS CONSTANT
+                indices = tf.concat([tf.fill([Ni*Nj,1],k),tf.reshape(yi,(Ni*Nj,1)),tf.reshape(xi,(Nj*Ni,1))],axis=1) # (V 3)
+                mask   = tf.tile(tf.reshape(tf.one_hot(k,self.K),(1,1,1,self.K))*tf.reshape(tf.one_hot(i,self.Ic),(1,self.Ic,1,1))*tf.reshape(tf.one_hot(j,self.Jc),(1,1,self.Jc,1)),[1,(self.I/self.Ic+1)*self.Ic,(self.J/self.Jc+1)*self.Jc,1])
+		deconv = self.deconv_(tf.transpose(tf.expand_dims(self.m*(1-mask[:,:self.I,:self.J]),-1)*self.p,[4,0,1,2,3]))  # ( N I J C)
+		wnorm    = mynorm(self.W[k] ,[1,2,3]) # (R)
+		patches = tf.reshape(tf.extract_image_patches(self.input-deconv-self.b,(1,self.Ic,self.Jc,1),(1,self.s,self.s,1),(1,1,1,1),"VALID"),(self.bs,self.I,self.J,self.Ic,self.Jc,self.C))
+		selected_patches = patches[:,i::self.Ic,j::self.Jc] # (N I' J' Ic Jc C)
+		########### P
+                prior   = tf.reshape(tf.log(self.pi[k]),(1,1,self.R,1))
+                m2v2    = -tf.expand_dims(tf.square(self.m_[k,i::self.Ic,j::self.Jc])+self.v2_[k,i::self.Ic,j::self.Jc],2)*tf.reshape(wnorm,(1,1,self.R,1))/(2*self.sigmas2[0]) #(I' J' R N) ### PLUSSSS
+                a1      = tf.tensordot(selected_patches,self.W[k],[[3,4,5],[1,2,3]])*tf.expand_dims(self.m[:,i::self.Ic,j::self.Jc,k],-1)/self.sigmas2[0]# (N I' J' R)
+		ta1     = tf.transpose(a1,[1,2,3,0]) # ( I' J' R N)
+                K       = tf.reshape(mysoftmax(m2v2+prior+ta1,axis=2,coeff=0.005),(Ni,Nj,self.R,self.bs)) # (I' J' R N)
+                new_p   = tf.scatter_nd_update(self.p_,indices,tf.gather_nd(K,indices[:,1:]))
+#                ######## V
+                value  = tf.tensordot(K,wnorm,[[2],[0]])# (I' J' N)
+#                v2     = 1/self.next_layer.sigmas2[0]+value/self.sigmas2[0]
+#                new_v2 = tf.scatter_nd_update(self.v2_,[[k,i,j]],[tf.clip_by_value(1/v2,0.00001,1000000)])
+                ######## M
+                if(isinstance(self.next_layer,ConvLayer)):
+                    backward = self.next_layer.deconv()[:,:,:,k]+self.next_layer.b_[k]
+                elif(isinstance(self.next_layer,FinalLayer) or isinstance(self.next_layer,DenseLayer)):
+                    backward = self.next_layer.backward(0)+tf.expand_dims(self.next_layer.bb[:,:,k],0)
+                else:
+                    backward = self.next_layer.deconv()[:,:,:,k]
+                b       = tf.tensordot(K,self.W[k],[[2],[0]])# (I' J' N Ic Jc C)
+                forward = tf.reduce_sum(tf.transpose(selected_patches,[1,2,0,3,4,5])*b,[3,4,5])  # (I' J' N)
+                mcoeff  = self.next_layer.sigmas2[0]/self.sigmas2[0]
+		update_value_m  = (forward*mcoeff+tf.transpose(backward[:,i::self.Ic,j::self.Jc],[1,2,0]))/(1+mcoeff*value)
+                new_m   = tf.scatter_nd_update(self.m_,indices,tf.gather_nd(update_value_m,indices[:,1:]))#tf.transpose(tf.reshape(tf.transpose(update_value_m,[2,0,1]),(self.bs,-1))))
+                return [new_p,new_m] 
+        def update_vmpk2(self):# DONE
+                i      = self.i_
+                j      = self.j_
+                k      = self.k_
                 deconv = self.minideconvmijk(i,j,k)
+		input_patch = self.input[:,i*self.s:i*self.s+self.Ic,j*self.s:j*self.s+self.Jc]#self.input_patches[:,i,j]
+		wnorm    = mynorm(self.W[k] ,[1,2,3]) # (R)
                 ######## P
-                a       = self.input_patches[:,i,j,:]-deconv-self.b#(N Ic Jc C)
-                prior   = tf.reshape(tf.log(self.pi[k]),(1,self.R))
-                m2v2    = -tf.expand_dims(tf.square(self.m_[k,i,j])+self.v2_[k,i,j],-1)*tf.reshape(mynorm(self.W[k] ,[1,2,3]),(1,self.R))/(2*self.sigmas2[0]) #(N R) ### PLUSSSS
+                a       = input_patch-deconv-self.b#(N Ic Jc C)
+                prior   = tf.expand_dims(tf.log(self.pi[k]),0)
+                m2v2    = -tf.expand_dims(tf.square(self.m_[k,i,j])+self.v2_[k,i,j],-1)*tf.expand_dims(wnorm,0)/(2*self.sigmas2[0]) #(N R) ### PLUSSSS
                 a1      = tf.tensordot(a,self.W[k],[[1,2,3],[1,2,3]])*tf.expand_dims(self.m_[k,i,j],-1)/self.sigmas2[0]# (N R)
-                K       = mysoftmax(m2v2+a1+prior,axis=1,coeff=0.05) # ( N R )
+                K       = mysoftmax(m2v2+a1+prior,axis=1,coeff=0.005) # ( N R )
                 new_p   = tf.scatter_nd_update(self.p_,[[k,i,j]],[tf.transpose(K)])
-                ######## V
-                value  = tf.tensordot(mynorm(self.W[k],[1,2,3]),new_p[k,i,j],[[0],[0]])# (bs)
+#                ######## V
+                value  = tf.tensordot(wnorm,K,[[0],[1]])# (bs)
                 v2     = 1/self.next_layer.sigmas2[0]+value/self.sigmas2[0]
-                new_v2 = tf.scatter_nd_update(self.v2_,[[k,i,j]],[tf.clip_by_value(1/v2,0.0001,10000)])
+                new_v2 = tf.scatter_nd_update(self.v2_,[[k,i,j]],[tf.clip_by_value(1/v2,0.00001,1000000)])
                 ######## M
                 if(isinstance(self.next_layer,ConvLayer)):
                     backward = self.next_layer.deconv()[:,i,j,k]+self.next_layer.b_[k]
                 elif(isinstance(self.next_layer,FinalLayer) or isinstance(self.next_layer,DenseLayer)):
                     backward = self.next_layer.backward(0)[:,i,j,k]+self.next_layer.bb[i,j,k]
                 else:
-                    backward = self.next_layer.deconv()[:,i,j,k]
-                b       = tf.tensordot(new_p[k,i,j],self.W[k],[[0],[0]])# (N Ic Jc C)
+                    backward = self.next_layer.deconvijk(i,j,k)#()[:,i,j,k]
+                b       = tf.tensordot(K,self.W[k],[[1],[0]])# (N Ic Jc C)
                 forward = tf.reduce_sum(a*b,[1,2,3])  # (N)
                 mcoeff  = self.next_layer.sigmas2[0]/self.sigmas2[0]
                 new_m   = tf.scatter_nd_update(self.m_,[[k,i,j]],[(forward*mcoeff+backward)/(1+mcoeff*value)])
-                return [new_v2,new_m,new_p]
+                return [new_p,new_m,new_v2]
         def update_Wk(self):
                 k = self.k_
                 def helper(v):
@@ -376,15 +428,18 @@ class ConvLayer:
                     numerator   = tf.add_n([helperabs(self.posis[i]) for i in xrange(self.I*self.J)])#tf.reduce_sum(tf.map_fn(helperabs,self.posis,dtype=tf.float32,back_prop=False,parallel_iterations=10),0) # R Ic Jc C
                     denominator = tf.reduce_sum(tf.square(self.m_[k])+self.v2_[k])
                     new_w       = tf.scatter_update(self.W_,[[k,0]],[numerator/(denominator+self.sparsity_prior)])
-                return [new_w]
+                return []#[new_w]
         def update_pi(self):
                 a44      = tf.reduce_mean(self.p,axis=[0,1,2])
                 new_pi   = tf.assign(self.pi,a44/tf.reduce_sum(a44,axis=1,keepdims=True))
                 return [new_pi]
         def update_b(self):
-                P = self.input-self.deconv()
-                new_b = tf.assign(self.b_,tf.reduce_mean(P,axis=[0,1,2]))
-                return [new_b]
+		if(1):
+	                P = self.input-self.deconv()
+	                new_b = tf.assign(self.b_,tf.reduce_mean(P,axis=[0,1,2]))
+	                return [new_b]
+		else:
+			return []
         def update_sigma(self,local=1):
                 rec_patch = self.backward()
                 a1 = tf.reduce_sum(tf.square(self.input-self.b-self.deconv()))
@@ -393,7 +448,7 @@ class ConvLayer:
                 a4 = tf.reduce_sum(tf.reduce_sum(tf.reshape(mynorm(self.W,[2,3,4]),(self.K,1,1,self.R,1))*self.p_,axis=3)*(tf.square(self.m_)+self.v2_))
                 value = (a1+a2+a3+a4)
                 if(local):
-                    new_sigmas2 = tf.assign(self.sigmas2,[tf.clip_by_value(value/float32(prod(self.input_shape)),0.1,2)])
+                    new_sigmas2 = tf.assign(self.sigmas2,[value/float32(prod(self.input_shape))])
                     return [new_sigmas2]
                 else:
                     return value
@@ -422,7 +477,7 @@ class PoolLayer:
 		self.W       = tf.Variable(tf.reshape(tf.eye(self.R),(self.R,self.Ic,self.Jc)))# (R,Ic,Jc) always D_in last
 		self.pi      = tf.Variable(tf.fill([self.R],float32(1.0/self.R)))
 		self.sigmas2 = tf.Variable(tf.ones(1))
-		self.m_      = tf.Variable(tf.ones((self.C,self.bs,self.I,self.J))) # (C,bs,I,J)
+		self.m_      = tf.Variable(tf.random_normal((self.C,self.bs,self.I,self.J))) # (C,bs,I,J)
                 self.m       = tf.transpose(self.m_,[1,2,3,0])          # (bs,I,J,C)
 		self.p_      = tf.Variable(mysoftmax(tf.random_uniform((self.C,self.bs,self.I,self.J,self.R)),axis=4))#tf.concat(self.pk,axis=3) # (C,bs,I,J,R)
                 self.p       = tf.transpose(self.p_,[1,2,3,0,4])        # (bs,I,J,C,R)
@@ -439,7 +494,7 @@ class PoolLayer:
             if(random):
                 new_p   = tf.assign(self.p_,mysoftmax(tf.random_uniform((self.C,self.bs,self.I,self.J,self.R)),axis=4))
                 new_v   = tf.assign(self.v2_,tf.ones((self.C,self.bs,self.I,self.J)))
-                new_m   = tf.assign(self.m_,tf.ones((self.C,self.bs,self.I,self.J)))
+                new_m   = tf.assign(self.m_,tf.random_normal((self.C,self.bs,self.I,self.J)))
             else:
                 new_p   = tf.assign(self.p_,tf.transpose(self.dn_p,[3,0,1,2,4]))
                 new_m   = tf.assign(self.m_,tf.transpose(self.dn_output,[3,0,1,2]))
@@ -451,8 +506,10 @@ class PoolLayer:
         def deconv(self,v=None):
                 if(v==None):
                         v = tf.expand_dims(self.m,-1)*self.p
-#                v = tf.transpose(v,[0,4,1,2,3])#TO GET IT (K,1,bs,I,J,R)
                 return self.deconv_(v)
+	def deconvijk(self,i,j,k):
+		I,J = tf.div(i,self.Ic),tf.div(j,self.Jc)
+		return self.m_[k,:,I,J]*self.p_[k,:,I,J,self.Jc*tf.mod(i,self.Ic)+tf.mod(j,self.Jc)]
 	def backward(self):
                 return tf.transpose(tf.tensordot(tf.expand_dims(self.m,-1)*self.p,self.W,[[4],[0]]),[0,1,2,4,5,3])#(N,I,J,Ic,Jc,C)
 	def sample(self,M,K=None,sigma=1):
@@ -474,7 +531,7 @@ class PoolLayer:
                 return self.likelihood()-tf.reduce_sum(self.p*(tf.log(self.p+eps)))+tf.reduce_sum(tf.log(2*self.pi_*self.v2+eps)/2)
         def update_v2(self):# DONE
                 v2     = 1/self.next_layer.sigmas2[0]+1/self.sigmas2[0]
-                new_v2 = tf.assign(self.v2_,tf.clip_by_value(tf.ones_like(self.v2_)/v2,0.0001,10000))
+                new_v2 = tf.assign(self.v2_,tf.clip_by_value(tf.ones_like(self.v2_)/v2,0.0001,100000))
                 return [new_v2]
         def update_vmpk(self):# DONE
 #                back_w  = self.backward()
@@ -482,7 +539,7 @@ class PoolLayer:
                 ####### P
                 a1      = proj*tf.expand_dims(self.m_,-1)/self.sigmas2[0]# (C N I J R)
                 a2      = -tf.expand_dims(tf.square(self.m_)+self.v2_,-1)/(2*self.sigmas2[0]) # (C N I J)
-                K       = mysoftmax(a1+a2+tf.log(tf.reshape(self.pi,(1,1,1,1,self.R))),axis=4,coeff=0.001) # (C N I J R)
+                K       = mysoftmax(a1+a2+tf.log(tf.reshape(self.pi,(1,1,1,1,self.R))),axis=4,coeff=0.01) # (C N I J R)
                 new_p   = tf.assign(self.p_,K)
                 ####### V
                 new_v2 = self.update_v2()[0]
@@ -511,7 +568,7 @@ class PoolLayer:
 #                a4 = -tf.reduce_sum(tf.square(rec_patch))
                 value = (a1+a2+a3)
                 if(local):
-                    new_sigmas2 = tf.assign(self.sigmas2,[tf.clip_by_value(value/float32(prod(self.input_shape)),0.000001,10)])
+                    new_sigmas2 = tf.assign(self.sigmas2,[value/float32(prod(self.input_shape))])
                     return [new_sigmas2]
                 else:
                     return value
@@ -573,8 +630,9 @@ class InputLayer:
 
 
 class FinalLayer:
-        def __init__(self,input_layer,R):
+        def __init__(self,input_layer,R,sparsity_prior=0):
                 self.input_layer       = input_layer
+		self.sparsity_prior = sparsity_prior
                 input_layer.next_layer = self
 		self.input_shape       = input_layer.output_shape
                 self.bs                = self.input_shape[0]
@@ -593,7 +651,7 @@ class FinalLayer:
                 self.m       = float32(1)
                 self.K       = 1
                 self.k_      = tf.placeholder(tf.int32)
-		self.W       = tf.Variable(tf.random_normal((1,R,self.D_in))/(self.D_in),trainable=True)
+		self.W       = tf.Variable(tf.random_normal((1,R,self.D_in),0,1),trainable=True)
 		self.pi      = tf.Variable(mysoftmax(tf.random_normal((1,R))*0.1),trainable=False)
 		self.sigmas2 = tf.Variable(tf.ones(1),trainable=False)
 		self.b_      = tf.Variable(tf.zeros((self.D_in)),trainable=True)
@@ -601,6 +659,10 @@ class FinalLayer:
 		self.bb      = tf.reshape(self.b_,self.input_shape[1:])
                 self.p_      = tf.Variable(mysoftmax(tf.random_normal((1,self.bs,R)),axis=2),trainable=False)
 		self.p       = tf.transpose(self.p_,[1,0,2])
+                self.v2_      = tf.Variable(tf.ones((self.bs,))*0.001,trainable=False)
+		self.m_       = tf.Variable(tf.ones((self.bs,)),trainable=False)
+		self.next_m = tf.Variable(tf.ones((1,)),trainable=False)
+                self.next_sigmas2 = tf.Variable(tf.ones(1)*0.1,trainable=False)
                 input_layer.next_layer_sigmas2 = self.sigmas2
                 # DN OUTPUT USED TO INIT 
                 proj           = tf.tensordot(tf.layers.flatten(input_layer.dn_output)-self.b,self.W/(1+mynorm(self.W,axis=2,keepdims=True)),[[1],[2]]) # (N K R)
@@ -624,45 +686,60 @@ class FinalLayer:
                 return [new_W]
         def backward(self,flat=1):
 		if(flat):
-                        return tf.tensordot(self.p,self.W,[[1,2],[0,1]])
+                        return tf.tensordot(self.p*tf.reshape(self.m_,(self.bs,1,1)),self.W,[[1,2],[0,1]])
 		else:
-			return tf.reshape(tf.tensordot(self.p,self.W,[[1,2],[0,1]]),self.input_shape)
+			return tf.reshape(tf.tensordot(self.p*tf.reshape(self.m_,(self.bs,1,1)),self.W,[[1,2],[0,1]]),self.input_shape)
         def sample(self,samples,K=None,sigma=1):
                 """ K must be a pre imposed region used for generation
                 if not given it is generated according to pi, its shape 
                 must be (N K R) with a one hot vector on the last dimension
                 sampels is a dummy variable not used in this layer   """
                 noise = sigma*tf.random_normal(self.input_shape)*tf.sqrt(self.sigmas2[0])
+		m     = sigma*tf.random_normal((self.bs,))*tf.sqrt(self.next_sigmas2[0])+self.next_m
                 if(K is None):
                     K = tf.one_hot(tf.transpose(tf.multinomial(self.pi,self.bs)),self.R)
 		if(self.is_flat):
-	                return tf.tensordot(K,self.W,[[1,2],[0,1]])+noise+self.bb
+	                return tf.tensordot(K*tf.reshape(m,(self.bs,1,1)),self.W,[[1,2],[0,1]])+noise+self.bb
 		else:
-                        return tf.reshape(tf.tensordot(K,self.W,[[1,2],[0,1]]),self.input_shape)+noise+self.bb
+                        return tf.reshape(tf.tensordot(K*tf.reshape(m,(self.bs,1,1)),self.W,[[1,2],[0,1]]),self.input_shape)+noise+self.bb
         def likelihood(self):
                 rec = -utils.SSE(self.input_-self.b,self.backward(1))
                 k1  = -self.bs*self.D_in*(tf.log(self.sigmas2[0]*2*3.14159)/2)
                 k2  = tf.reduce_sum(tf.reduce_sum(self.p,axis=0)*tf.log(self.pi+eps))
                 a3  = -tf.reduce_sum(self.input_layer.v2)
-                a4  = -tf.reduce_sum(self.p*tf.expand_dims(mynorm(self.W,2),0))
-                a5  = tf.reduce_sum(mynorm(tf.reduce_sum(tf.expand_dims(self.W,0)*tf.expand_dims(self.p,-1),2),2))
-                return k1+k2+(rec+a3+a4+a5)/(2*self.sigmas2[0])
+                a4  = -tf.reduce_sum((1*self.v2_+tf.square(self.m_))*tf.tensordot(self.p_[0],mynorm(self.W[0],1),[[1],[0]]))
+                a5  = tf.reduce_sum(tf.pow(self.m_,2)*mynorm(tf.tensordot(self.p_[0],self.W[0],[[1],[0]]),1))
+                return k1+k2+(rec+a3+a4+a5)/(2*self.sigmas2[0])-1*utils.SSE(self.next_m,self.m_)/(2*self.next_sigmas2[0])
         def KL(self):
-                return self.likelihood()-tf.reduce_sum(self.p*tf.log(self.p+0.0000000000001))#we had a small constant for holding the case where p is fixed and thus a one hot
+                return self.likelihood()-tf.reduce_sum(self.p*tf.log(self.p+0.0000000000001))+1*tf.reduce_sum(tf.log(2*3.14159*self.v2_+eps)/2)#we had a small constant for holding the case where p is fixed and thus a one hot
         def update_vmpk(self):
-                a2    = tf.tensordot(self.input_,self.W,[[1],[2]])-tf.expand_dims(mynorm(self.W,2)/2,0) # (N K R)
-                V     = mysoftmax(a2/self.sigmas2[0]+tf.log(tf.expand_dims(self.pi,0)),axis=2,coeff=0.01)
-                new_p = tf.assign(self.p_,tf.transpose(V,[1,0,2]))
+                proj    = tf.tensordot(self.input_-self.b,self.W[0],[[1],[1]]) #(N R)
+                # UPDATE V
+                value   = tf.tensordot(self.p_[0],mynorm(self.W[0],1),[[1],[0]])
+                value_  = 1/(self.next_sigmas2[0]+eps)+value/(eps+self.sigmas2[0])
+                new_v2  = tf.assign(self.v2_,1/value_)#0.001
+                # UPDATE M 
+                priorm  = self.next_m# ( N )
+                coeff   = self.next_sigmas2[0]/self.sigmas2[0]
+                new_m   = tf.assign(self.m_,(priorm+coeff*tf.reduce_sum(proj*self.p_[0],axis=1))/(1+coeff*value))
+                return [new_m,new_v2]
+        def update_p(self):
+		proj    = tf.tensordot(self.input_,self.W[0],[[1],[1]]) # ( N R)
+                prior   = tf.expand_dims(self.pi[0],0)
+                m2v2    = -tf.expand_dims(tf.square(self.m_)+self.v2_,-1)*tf.expand_dims(mynorm(self.W[0],1),0) # ( N R )
+                V       = mysoftmax(proj*tf.expand_dims(self.m_,-1)/self.sigmas2[0]+m2v2/(2*self.sigmas2[0])+tf.log(prior+0.0000001),coeff=0.0001)
+                new_p = tf.assign(self.p_,tf.expand_dims(V,0))
                 return [new_p]
         def update_sigma(self,local=1):
                 rec = -utils.SSE(self.input_-self.b,self.backward(1))
                 a1  = -tf.reduce_sum(self.input_layer.v2)
-                a3  = -tf.reduce_sum(tf.reduce_sum(self.p*tf.expand_dims(mynorm(self.W,2),0),2))
-                a2  = tf.reduce_sum(mynorm(tf.reduce_sum(tf.expand_dims(self.W,0)*tf.expand_dims(self.p,-1),2),2))
+                a3  = -tf.reduce_sum((1*self.v2_+tf.square(self.m_))*tf.tensordot(self.p_[0],mynorm(self.W[0],1),[[1],[0]]))
+                a2  = tf.reduce_sum(tf.square(self.m_)*mynorm(tf.tensordot(self.p_[0],self.W[0],[[1],[0]]),1))
                 value =-(rec+a1+a2+a3)
                 if(local):
-                    new_sigmas2 = tf.assign(self.sigmas2,[tf.clip_by_value(value/float32(prod(self.input_shape)),0.000001,10)])
-                    return [new_sigmas2]
+                    new_sigmas2 = tf.assign(self.sigmas2,[value/float32(prod(self.input_shape))])
+		    nnew_sigmas2= tf.assign(self.next_sigmas2,[tf.reduce_mean((self.v2_+tf.square(self.m_-self.next_m)))])
+                    return [new_sigmas2,nnew_sigmas2]
                 else:
                     return value
         def update_pi(self):
@@ -670,15 +747,20 @@ class FinalLayer:
                 new_pi      = tf.assign(self.pi,a44/tf.reduce_sum(a44,axis=1,keepdims=True))
                 return [new_pi]
         def update_Wk(self):
-                rec    = tf.reduce_sum(tf.reshape(self.input_-self.b,(self.bs,1,1,self.D_in))*tf.expand_dims(self.p,-1),0)
-                K      = tf.reduce_sum(self.p,0)
-                KK     = rec/tf.expand_dims(K,-1)
-                new_W  = tf.assign(self.W,KK)
+                rec    = tf.reduce_sum(tf.reshape((self.input_-self.b)*tf.expand_dims(self.m_,-1),(self.bs,1,self.D_in))*tf.expand_dims(self.p_[0],-1),0)
+                K      = tf.reduce_sum(self.p_[0]*tf.expand_dims(tf.square(self.m_)+self.v2_,-1),0)
+                KK     = rec/(tf.expand_dims(K,-1)+self.sparsity_prior)
+                new_W  = tf.assign(self.W,[KK])
                 return [new_W]
         def update_b(self):
-                P = self.input_-self.backward(1)
-                new_b = tf.assign(self.b_,tf.reduce_mean(P,axis=[0]))
-                return [new_b]
+		if(1):
+			m  = tf.reduce_mean(self.m_)
+                        new_m = tf.assign(self.next_m,[m])
+	                P = self.input_-self.backward(1)
+	                new_b = tf.assign(self.b_,tf.reduce_mean(P,axis=[0]))
+	                return [new_b,new_m]
+		else:
+			return []
 
 
 

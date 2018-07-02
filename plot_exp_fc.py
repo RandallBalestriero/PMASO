@@ -27,33 +27,40 @@ def doit(unsup,neurons):
     LOSSES,reconstruction,x,samplesclass1,samples1,W,b=cPickle.load(f)
     f.close()
 
-    figure(figsize=(15,3))
-    for i in xrange(6):
-        subplot(2,6,1+i)
-        imshow(x[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-        subplot(2,6,7+i)
-        imshow(reconstruction[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
+    for s in xrange(len(reconstruction)):
+        figure(figsize=(15,3))
+        for i in xrange(6):
+            subplot(2,6,1+i)
+            imshow(x[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
+            xticks([])
+            yticks([])
+            subplot(2,6,7+i)
+            imshow(reconstruction[s][i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
+            xticks([])
+            yticks([])
+        tight_layout()
+        savefig('BASE_EXP/fc_reconstruction_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
+        close()
 
-    tight_layout()
-    savefig('BASE_EXP/fc_reconstruction_unsup'+str(unsup)+'_neurons'+str(neurons)+'.png')
-    close()
+        figure(figsize=(15,3))
+        classes=[0]
+        plotclasses(classes,samplesclass1[s])
+        tight_layout()
+        savefig('BASE_EXP/fc_threeclass_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
+        close()
+
+        figure(figsize=(15,15))
+        classes=range(10)
+        plotclasses(classes,samplesclass1[s])
+        tight_layout()
+        savefig('BASE_EXP/fc_tenclass_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
+        close()
 
     figure(figsize=(15,3))
-    classes=[0,3]
-    plotclasses(classes,samplesclass1)
+    classes=[1,3,5]
+    plotclasses(classes,samplesclass1[-1])
     tight_layout()
     savefig('BASE_EXP/fc_threeclass_unsup'+str(unsup)+'_neurons'+str(neurons)+'.png')
-    close()
-
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass1)
-    tight_layout()
-    savefig('BASE_EXP/fc_tenclass_unsup'+str(unsup)+'_neurons'+str(neurons)+'.png')
     close()
 
     figure(figsize=(15,3))
