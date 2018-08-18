@@ -45,6 +45,8 @@ def plotclasses(classes):
     for i,k in zip(range(len(classes)),classes):
         for j in xrange(10):
             subplot(len(classes),10,1+i*10+j)
+            print shape(samplesclass1)
+	    print shape(samplesclass1[k][j,:,:,0])
             imshow(samplesclass1[k][j,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
             xticks([])
             yticks([])
@@ -53,8 +55,10 @@ def plotclasses(classes):
 
 
 
-f=open('BASE_EXP/exp_cnn_sup1_1_3.pkl','rb')
+f=open('BASE_EXP/exp_cnn_sup1_1.pkl','rb')
 LOSSES,reconstruction,x,samplesclass1,samples1,W=cPickle.load(f)
+print shape(samplesclass1),shape(samples1)
+print reconstruction.max()
 f.close()
 
 
@@ -78,12 +82,12 @@ close()
 
 
 
-figure(figsize=(15,5))
-classes=[0,1,3]
-plotclasses(classes)
-tight_layout()
-savefig('BASE_EXP/cnn_threeclass.png')
-close()
+#figure(figsize=(15,5))
+#classes=[0,1,3]
+#plotclasses(classes)
+#tight_layout()
+#savefig('BASE_EXP/cnn_threeclass.png')
+#close()
 
 
 figure(figsize=(15,15))
@@ -95,15 +99,17 @@ close()
 
 
 figure(figsize=(15,3))
-for i in xrange(8):
-    subplot(2,8,i+1)
-    imshow(reshape(W[i,0],(3,3)),aspect='auto',cmap='Greys',interpolation='nearest')
+for i in xrange(len(W)):
+    subplot(2,len(W),i+1)
+    imshow(W[i,0,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
     xticks([])
     yticks([])
-    subplot(2,8,i+9)
-    imshow(reshape(W[i,1],(3,3)),aspect='auto',cmap='Greys',interpolation='nearest')
+    subplot(2,len(W),i+len(W)+1)
+    imshow(W[i,1,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
     xticks([])
     yticks([])
+
+print W[0,0],W[0,1]
 
 tight_layout()
 show()

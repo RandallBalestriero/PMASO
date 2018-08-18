@@ -22,9 +22,9 @@ def plotclasses(classes,samplesclass1):
 
 
 
-def doit(unsup,neurons):
-    f=open('BASE_EXP/exp_fc_'+str(unsup)+'_'+str(neurons)+'.pkl','rb')
-    LOSSES,reconstruction,x,samplesclass1,samples1,W,b=cPickle.load(f)
+def doit(unsup,neurons,BN,U):
+    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_fc_'+str(unsup)+'_'+str(neurons)+'_'+str(BN)+'_'+str(U)+'.pkl','rb')
+    LOSSES,reconstruction,x,samplesclass0,samplesclass1,samples1,W,b,sigmas=cPickle.load(f)
     f.close()
 
     for s in xrange(len(reconstruction)):
@@ -39,50 +39,66 @@ def doit(unsup,neurons):
             xticks([])
             yticks([])
         tight_layout()
-        savefig('BASE_EXP/fc_reconstruction_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
+        savefig('BASE_EXP/fc_reconstruction_unsup'+str(unsup)+'_neurons'+str(neurons)+'_'+str(BN)+'_'+str(U)+'_step'+str(s)+'.png')
         close()
 
-        figure(figsize=(15,3))
-        classes=[0]
-        plotclasses(classes,samplesclass1[s])
-        tight_layout()
-        savefig('BASE_EXP/fc_threeclass_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
-        close()
+#        figure(figsize=(15,3))
+#        classes=[0]
+#        plotclasses(classes,samplesclass1[s])
+#        tight_layout()
+#        savefig('BASE_EXP/fc_threeclass1_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
+#        close()
 
         figure(figsize=(15,15))
         classes=range(10)
         plotclasses(classes,samplesclass1[s])
         tight_layout()
-        savefig('BASE_EXP/fc_tenclass_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
+        savefig('BASE_EXP/fc_tenclass1_unsup'+str(unsup)+'_neurons'+str(neurons)+'_'+str(BN)+'_'+str(U)+'_step'+str(s)+'.png')
         close()
 
-    figure(figsize=(15,3))
-    classes=[1,3,5]
-    plotclasses(classes,samplesclass1[-1])
-    tight_layout()
-    savefig('BASE_EXP/fc_threeclass_unsup'+str(unsup)+'_neurons'+str(neurons)+'.png')
-    close()
+#        figure(figsize=(15,3))
+#        classes=[0]
+#        plotclasses(classes,samplesclass0[s])
+#        tight_layout()
+#        savefig('BASE_EXP/fc_threeclass0_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
+#        close()
+
+        figure(figsize=(15,15))
+        classes=range(10)
+        plotclasses(classes,samplesclass0[s])
+        tight_layout()
+        savefig('BASE_EXP/fc_tenclass0_unsup'+str(unsup)+'_neurons'+str(neurons)+'_'+str(BN)+'_'+str(U)+'_step'+str(s)+'.png')
+        close()
 
     figure(figsize=(15,3))
     for i in xrange(10):
         subplot(2,10,i+1)
-        imshow(reshape(W[i,0],(28,28)),aspect='auto',cmap='Greys',interpolation='nearest')
+        imshow(reshape(W[0][i,0],(28,28)),vmin=W[0][i].min(),vmax=W[0][i].max(),aspect='auto',cmap='Greys',interpolation='nearest')
         xticks([])
         yticks([])
         subplot(2,10,i+11)
-        imshow(reshape(W[i,1],(28,28)),aspect='auto',cmap='Greys',interpolation='nearest')
+        imshow(reshape(W[0][i,1],(28,28)),vmin=W[0][i].min(),vmax=W[0][i].max(),aspect='auto',cmap='Greys',interpolation='nearest')
         xticks([])
         yticks([])
 
     tight_layout()
-    savefig('BASE_EXP/fc_W_unsup'+str(unsup)+'_neurons'+str(neurons)+'.png')
+    savefig('BASE_EXP/fc_W_unsup'+str(unsup)+'_neurons'+str(neurons)+'_'+str(BN)+'_'+str(U)+'.png')
     close()
 
 
-doit(0,16)
-doit(0,64)
-doit(1,16)
-doit(1,64)
+doit(0,2,1,0)
+doit(0,2,0,1)
+doit(0,2,1,1)
+#doit(0,4,1,0)
+
+#doit(0,64,0,0)
+#doit(0,64,0,1)
+#doit(0,64,1,1)
+
+
+#doit(0,64)
+#doit(1,16)
+#doit(1,64)
 
 #show()
 

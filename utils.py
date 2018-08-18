@@ -2,8 +2,8 @@ import tensorflow as tf
 import time
 from pylab import *
 import layers as layers_
-
-
+import itertools
+from random import shuffle
 
 
 
@@ -18,25 +18,6 @@ import layers as layers_
 #############################################################################################
 
 
-def update_sigma(layers,local=1):
-    if(local):
-        v2 = []
-        for l in layers:
-            if(not isinstance(l,layers_.InputLayer)):
-                v2+=l.update_sigma(local)
-        return v2
-    else:
-        v2   = 0.
-        accu = 0.
-        for l in layers:
-            if(not isinstance(l,layers_.InputLayer)):
-                v2+=l.update_sigma(local)
-                accu+=prod(l.input_shape)
-        update_ops = []
-        for l in layers:
-            if(not isinstance(l,layers_.InputLayer)):
-                update_ops.append(tf.assign(l.sigmas2,[tf.clip_by_value(v2/accu,0.000000005,10)]))
-        return update_ops
 
 
 def sample(layers,Ks=None,sigma=1):
@@ -71,7 +52,7 @@ def sampletrue(layers):
     try:
         return layers[1].deconv()
     except:
-        return layers[1].backward(0)
+        return layers[1].sample(0,deterministic=True)
 
 
 def SSE(x,y):
@@ -100,17 +81,12 @@ def KL(layers):
 
 
 class model:
-    def __init__(self,layers,local_sigma=1):
+    def __init__(self,layers):
         self.layers    = layers
-        self.local_sigma = local_sigma
         self.L         = len(layers)
         self.x         = tf.placeholder(tf.float32,shape=layers[0].input_shape)
         self.y         = tf.placeholder(tf.int32,shape=[layers[0].input_shape[0]]) # MIGHT NOT BE USED DEPENDING ON SETTING
         self.sigma     = tf.placeholder(tf.float32)
-        # CREATE DN LOSS FOR INIT
-        self.dn_loss    = tf.losses.softmax_cross_entropy(tf.one_hot(self.y,10),self.layers[-1].dn_p_logits[:,0,:]) # TAKE THE LAST ONE AS ONE NEURON
-        learner         = tf.train.AdamOptimizer(0.005)
-        self.dn_updates = learner.minimize(self.dn_loss)
         # INIT SESSION
         session_config = tf.ConfigProto(allow_soft_placement=False,log_device_placement=True)
         session_config.gpu_options.allow_growth=True
@@ -118,18 +94,20 @@ class model:
         init           = tf.global_variables_initializer()
         session.run(init)
         self.session=session
-        ## INITIALIZATION
+        ### INITIALIZATION OP
         self.initx              = tf.assign(self.layers[0].m,self.x)
         self.inity              = tf.assign(self.layers[-1].p_,tf.expand_dims(tf.one_hot(self.y,self.layers[-1].R),0))
-        self.initop_W_random       = [l.init_W(1) for l in layers[1:]]
-        self.initop_W              = [l.init_W(0) for l in layers[1:]]
-        self.initop_thetaq_random  = [l.init_thetaq(1) for l in layers[1:]]
-        self.initop_thetaq         = [l.init_thetaq(0) for l in layers[1:]]
-        ### GATHER UPDATES
-        self.updates_vmpk    = [l.update_vmpk() for l in layers[1:]]
-	self.update_last_pop = layers[-1].update_p()
-        self.updates_sigma_global = update_sigma(layers,0)
-        self.updates_sigma_local  = update_sigma(layers,1)
+        self.initop_thetaq_random  = [l.init_thetaq() for l in layers[1:]]
+        ### WEIGHTS UPDATES OP
+        self.updates_m       = [l.update_m() for l in layers[1:-1]]
+        self.updates_p       = [l.update_p() for l in layers[1:-1]]
+        self.updates_rho     = [l.update_rho() for l in layers[1:-1]]
+	self.updates_v2      = [l.update_v2() for l in layers[1:-1]]
+	self.update_last_p   = layers[-1].update_p() # SEPARATE DEPENDING ON SUP UNSUP TRAINING
+	self.updates_DD      = [l.update_DD() for l in layers[1:]]
+	self.updates_U        = [l.update_U() for l in layers[1:]]
+#        self.updates_sigma_global = update_sigma(layers,0)
+        self.updates_sigma   = [l.update_sigma() for l in layers[1:]]
         self.updates_Wk      = [l.update_Wk() for l in layers[1:]]
         self.updates_pi      = [l.update_pi() for l in layers[1:]]
         self.updates_b       = [l.update_b() for l in layers[1:]]
@@ -140,128 +118,179 @@ class model:
         self.samplesclass    = [sampleclass(layers,k,sigma=self.sigma) for k in xrange(layers[-1].R)]
         self.samples         = sample(layers,sigma=self.sigma)
         self.samplet         = sampletrue(layers)
-        # CREATE INDICES FOR CYCLING THE E STEP
-        indices = []
-        for l,l_ in zip(layers[1:-1],range(self.L-2)):
-            indices.append([])
-            if(isinstance(l,layers_.PoolLayer) or isinstance(l,layers_.FinalLayer)):
-                indices[-1].append([l_])
-            elif(isinstance(l,layers_.DenseLayer)):
-                for k in xrange(l.K):
-                    indices[-1].append([l_,k])
-            elif(isinstance(l,layers_.ConvLayer)):
-                for i in xrange(l.Ic):
-                    for j in xrange(l.Jc):
-                        for k in xrange(l.K):
-                            indices[-1].append([l_,i,j,k])
-        self.indices = indices#[i for j in indices for i in j]
-    def E_step(self,random=1,fineloss=1):
+    def get_sigmas(self):
+	return self.session.run([l.sigmas2_ for l in self.layers[1:]])
+    def get_bs(self):
+        return self.session.run([l.b_ for l in self.layers[1:]])
+    def get_Ws(self):
+	Ws = []
+	for l in self.layers[1:]:
+	    if(isinstance(l,layers_.ConvPoolLayer)):
+		Ws.append(self.session.run(l.W))
+	    else:
+                Ws.append(self.session.run(l.W)*self.session.run(l.U_)[newaxis,newaxis,:])
+	return Ws
+    def layer_E_step(self,lay,random=1,fineloss=1,init=0):
         loss = []
-#        if(random):
-#            perm = permutation(len(self.indices))
-#        else:
-#            perm = range(len(self.indices))
-#        for i in perm:
-#            t=time.time()
-#            if(len(self.indices[i])==1):   # POOL AND LAST LAYER
-#                self.session.run(self.updates_vmpk[self.indices[i][0]])
-#            elif(len(self.indices[i])==2): # FULLY CONNECTED
-#                self.session.run(self.updates_vmpk[self.indices[i][0]],feed_dict={self.layers[self.indices[i][0]+1].k_:int32(self.indices[i][1])})
-#            else:                     # CONV
-#                self.session.run(self.updates_vmpk[self.indices[i][0]],feed_dict={self.layers[self.indices[i][0]+1].i_:int32(self.indices[i][1]),self.layers[self.indices[i][0]+1].j_:int32(self.indices[i][2]),self.layers[self.indices[i][0]+1].k_:int32(self.indices[i][3])})
-#            newtime = time.time()-t
-#            if(fineloss):
-#                t=time.time()
-#                L = self.session.run(self.KL)
-#                loss.append(L)
-#                print "E AFTER ",self.indices[i],L,'KL',time.time()-t,'update',newtime
-#        if(fineloss==0):
-#            L = self.session.run(self.KL)
-#            loss.append(L)
-#        return loss
-        loss = []
-        for indices in self.indices[:len(self.indices)]:      # EACH ITEM IS A LIST OF INDICES FOR EACH LAYER remove the last layer if y was given
-            if(random):
-                perm = permutation(len(indices))
-            else:
-                perm = range(len(indices))
-            for i in perm:
-#		print self.session.run(self.layers[1].p_)
-                t=time.time()
-                if(len(indices[i])==1):   # POOL AND LAST LAYER
-                    self.session.run(self.updates_vmpk[indices[i][0]])
-                elif(len(indices[i])==2): # FULLY CONNECTED
-                    self.session.run(self.updates_vmpk[indices[i][0]],feed_dict={self.layers[indices[i][0]+1].k_:int32(indices[i][1])})
-                else:                     # CONV
-#		    print self.session.run(self.layers[1].m_)[int32(indices[i][3]),int32(indices[i][1])::3,int32(indices[i][2])::3]
-                    self.session.run(self.updates_vmpk[indices[i][0]],feed_dict={self.layers[indices[i][0]+1].i_:int32(indices[i][1]),self.layers[indices[i][0]+1].j_:int32(indices[i][2]),self.layers[indices[i][0]+1].k_:int32(indices[i][3])})
-#		    print "AFTER",self.session.run(self.layers[1].m_)[int32(indices[i][3]),int32(indices[i][1])::3,int32(indices[i][2])::3]
-                newtime = time.time()-t
+	l    = lay
+#        self.session.run(self.updates_DD[lay])
+        GAIN = self.session.run(self.KL)
+        print 'BEFORE',l,GAIN,
+	if(l<len(self.updates_v2)):
+            self.session.run(self.updates_v2[lay])
+            print 'AFTER V2',l,self.session.run(self.KL),
+        if(random==0):
+            iih = self.layers[l+1].m_indices
+        else:
+            perm = permutation(len(self.layers[l+1].m_indices))
+            iih = self.layers[l+1].m_indices[perm]
+	if(isinstance(self.layers[l+1],layers_.ConvPoolLayer)): # ALL BUT THE LAST LAYER
+            for i in iih:
+                self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
+                                                                        self.layers[l+1].j_:int32(i[1]),
+                                                                        self.layers[l+1].k_:int32(i[2])})
                 if(fineloss):
                     t=time.time()
                     L = self.session.run(self.KL)
                     loss.append(L)
-                    print "E AFTER ",indices[i],L,'KL',time.time()-t,'update',newtime
-	if(self.hold_last_p==0):
-	        self.session.run(self.update_last_pop)
-	        if(fineloss):
-	            L = self.session.run(self.KL)
-	            loss.append(L)
-	            print "E (p) AFTER LAST",L
-	self.session.run(self.updates_vmpk[-1])
-        L = self.session.run(self.KL)
-        loss.append(L)
-        print "E (mv) AFTER LAST",L
-        return loss
-    def M_step(self,random=1,fineloss=1,local=0):
-        loss = []
-        self.session.run(self.updates_pi)
-        if(fineloss):
-            L = self.session.run(self.like)
-            loss.append(L)
-        for l in xrange(self.L-2):
-            if(isinstance(self.layers[l+1],layers_.PoolLayer)):
-                pass
-            else:
-                if(random):
-                    perm = permutation(self.layers[l+1].K).astype('int32')
-                else:
-                    perm = range(self.layers[l+1].K)
-                for kk in perm:
+            print 'AFTER CONV M',self.session.run(self.KL),
+            for i in iih:
+                self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
+                                                                        self.layers[l+1].j_:int32(i[1]),
+                                                                        self.layers[l+1].k_:int32(i[2])})
+                if(fineloss):
                     t=time.time()
-                    self.session.run(self.updates_Wk[l],feed_dict={self.layers[l+1].k_:int32(kk)})
-                    newtime = time.time()-t
-                    if(fineloss):
-                        t=time.time()
-                        L = self.session.run(self.like)
-                        loss.append(L)
-                        print "M AFTER W",l,kk,L,'likelihood',time.time()-t,'update',newtime
-		        self.session.run(self.updates_b[l])
-		        if(fineloss):
-		            L = self.session.run(self.like)
-		            loss.append(L)
-		            print "M AFTER B",L
-        self.session.run(self.updates_Wk[-1])
-        if(fineloss):
-            L = self.session.run(self.like)
-            loss.append(L)
-            print "M AFTER LAST W",L
-        self.session.run(self.updates_b[-1])
-        if(fineloss):
-            L = self.session.run(self.like)
-            loss.append(L)
-            print "M AFTER LAST B",L
-	if(local==0):
-        	self.session.run(self.updates_sigma_global)
-        	L = self.session.run(self.like)
-        	loss.append(L)
-        	print "M AFTER S",L,self.session.run([l.sigmas2 for l in self.layers[1:]]),self.session.run(self.layers[-1].next_sigmas2)
+                    L = self.session.run(self.KL)
+                    loss.append(L)
+            print 'AFTER CONV P',self.session.run(self.KL),
+            for i in iih:
+                self.session.run(self.updates_rho[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
+                                                                        self.layers[l+1].j_:int32(i[1]),
+                                                                        self.layers[l+1].k_:int32(i[2])})
+                if(fineloss):
+                    t=time.time()
+                    L = self.session.run(self.KL)
+                    loss.append(L)
+            print 'AFTER RHO',self.session.run(self.KL)
+	elif(isinstance(self.layers[l+1],layers_.DenseLayer)):
+            for i in iih:
+		self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].k_:int32(i)})
+                if(fineloss):
+                    t=time.time()
+                    L = self.session.run(self.KL)
+                    loss.append(L)
+            print 'AFTER DENS M',self.session.run(self.KL),
+	    for i in iih:
+                self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].k_:int32(i)})
+                if(fineloss):
+                    t=time.time()
+                    L = self.session.run(self.KL)
+                    loss.append(L)
+            print 'AFTER DENS P',self.session.run(self.KL)
 	else:
-	        self.session.run(self.updates_sigma_local)
-        	L = self.session.run(self.like)
-        	loss.append(L)
-        	print "M AFTER S",L,self.session.run([l.sigmas2 for l in self.layers[1:]]),self.session.run(self.layers[-1].next_sigmas2)
-        return loss
+	    if(self.hold_last_p==0):
+	        self.session.run(self.update_last_p)
+	        L = self.session.run(self.KL)
+	        loss.append(L)
+                print 'AFTER LAST P',self.session.run(self.KL)
+        L = self.session.run(self.KL)
+	GAIN = L-GAIN
+        return loss,GAIN
+    def layer_M_step(self,lay,random=1,fineloss=1,local=0,dob=1,doU=1):
+        loss = []
+	l    = lay
+	GAIN = self.session.run(self.like)
+        print 'BEFORE',GAIN
+        if(random==0):
+            iih = self.layers[l+1].W_indices
+        else:
+            perm = permutation(len(self.layers[l+1].W_indices))
+            iih = self.layers[l+1].W_indices[perm]
+	if(lay>-1 and doU):
+            self.session.run(self.updates_U[l])
+            print 'AFTER U',self.session.run(self.like)
+        if(isinstance(self.layers[l+1],layers_.DenseLayer)):
+            for kk in iih:
+                t=time.time()
+                self.session.run(self.updates_Wk[l],feed_dict={self.layers[l+1].k_:int32(kk)})
+                newtime = time.time()-t
+                if(fineloss):
+                    t=time.time()
+                    L = self.session.run(self.like)
+                    loss.append(L)
+            print 'AFTER DENS W',self.session.run(self.like)
+            if(dob):
+                self.session.run(self.updates_b[l])
+                if(fineloss):
+                    L = self.session.run(self.like)
+                    loss.append(L)
+                print 'AFTER BBBBB',self.session.run(self.like)
+        elif(isinstance(self.layers[l+1],layers_.ConvPoolLayer)):
+            for kk in iih:
+                t=time.time()
+                self.session.run(self.updates_Wk[l],feed_dict={self.layers[l+1].r_:int32(kk[1]),
+								self.layers[l+1].k_:int32(kk[0]),
+								self.layers[l+1].i_:int32(kk[2]),
+								self.layers[l+1].j_:int32(kk[3])})
+                newtime = time.time()-t
+                if(fineloss):
+                    t=time.time()
+                    L = self.session.run(self.like)
+                    loss.append(L)
+            print 'AFTER CONV W',self.session.run(self.like)
+            if(dob):
+                self.session.run(self.updates_b[l])
+                if(fineloss):
+                    L = self.session.run(self.like)
+                    loss.append(L)
+                print 'AFTER BBBBB',self.session.run(self.like)
+        else:# LAST LAYER
+            self.session.run(self.updates_Wk[-1])
+            if(fineloss):
+                L = self.session.run(self.like)
+                loss.append(L)
+            print 'AFTER LAST W',self.session.run(self.like)
+	# UPDATE PI
+        self.session.run(self.updates_pi[l])
+        print 'AFTER PI',self.session.run(self.like)
+        if(fineloss):
+            L = self.session.run(self.like)
+            loss.append(L) 
+#        # UPDATE SIGMAS
+        self.session.run(self.updates_sigma[l])
+        L = self.session.run(self.like)
+	GAIN = L-GAIN
+        print 'AFTER SIGMA',self.session.run(self.like)
+        return loss,GAIN
+    def E_step(self,rcoeff,fineloss=0,random=0):
+        GAINS      = 0
+	LAYER_LOSS = []
+	LAYER_GAIN =rcoeff*2
+	mini_cpt   = 0
+        while(LAYER_GAIN>rcoeff and mini_cpt<80):
+            mini_cpt  +=1
+            LAYER_GAIN = 0
+            for l in range(self.L-1):
+                layer_cpt,g_ = 0,rcoeff
+                while(g_>rcoeff/(self.L-1.0) and layer_cpt<40):
+                    layer_cpt += 1
+                    l_,g_=self.layer_E_step(l,random=random,fineloss=fineloss)
+                    LAYER_LOSS.append(l_)
+                    LAYER_GAIN+=g_
+                    print "E,",l,'       ',g_,">",rcoeff/(self.L-1)
+	    GAINS+= LAYER_GAIN
+	return concatenate(LAYER_LOSS),GAINS
+    def M_step(self,rcoeff,fineloss=0,random=0,dob=1,doU=0):
+        LAYER_LOSS = []
+        GAINS = 0
+        for l in range(self.L-1):
+            layer_cpt,g_ = 0,rcoeff
+            while(g_>rcoeff/(self.L-1.0) and layer_cpt<40):
+                l_,g_=self.layer_M_step(l,random=random,fineloss=fineloss,dob=dob,doU=doU)
+                LAYER_LOSS.append(l_)
+                GAINS+=g_
+                print "M,",l,'          ',g_,">",rcoeff/(self.L-1)
+	return concatenate(LAYER_LOSS),GAINS
     def init_dataset(self,x,y=None):
         """this function initializes the variable of the
         first layer with x and possibly the last layer
@@ -274,27 +303,15 @@ class model:
             self.hold_last_p = 1
         else:
             self.hold_last_p = 0
-    def init_thetaq(self,random=1):
+    def init_thetaq(self):
         """this function is used alone when for example testing
         the model on a new dataset (using init_dataset),
         then the parameters of the model are kept as the 
         trained ones but one aims at correct initialization 
         of the Q fistribution parameters. 
         For initialization of the whole model see the below fun"""
-        if(random):
-            for op in self.initop_thetaq_random:
-                if(op is not None):
-                    self.session.run(op)
-        else:
-            for op in self.initop_thetaq:
-                if(op is not None):
-                    self.session.run(op)
-    def train_dn(self,n,y):
-        loss = []
-        for i in xrange(n):
-            self.session.run(self.dn_updates,feed_dict={self.y:y})
-            loss.append(self.session.run(self.dn_loss,feed_dict={self.y:y}))
-        return loss
+	for l in xrange(self.L-1-self.hold_last_p):
+            self.session.run(self.initop_thetaq_random[l])
     def sample(self,sigma):
         return self.session.run(self.samples,feed_dict={self.sigma:float32(sigma)})
     def sampleclass(self,sigma,k):
@@ -305,53 +322,70 @@ class model:
         return self.session.run(self.layers[-1].p_)[0]
 
 
-def train_model(model,rcoeff,CPT,random=0,fineloss=1,return_time=0,return_infos=0):
+def train_model(model,rcoeff,CPT,random=0,fineloss=1,return_time=0,return_infos=0,dob=1):
     global_global_L = 0
     cpt             = 0
     LOSSES          = []
+    GAINS           = []
+    LAYER_GAIN      = 2*rcoeff
     L               = rcoeff*2
     inittime=time.time()
     timings = []
     SIGMAS  = []
     LAST_M = []
     print "INIT",model.session.run(model.KL),model.session.run(model.like)
+    while(cpt<CPT and LAYER_GAIN>=0):
+        print cpt
+        cpt     += 1
+        LAYER_GAIN      = 2*rcoeff
+	mini_cpt = 0
+        while(LAYER_GAIN>rcoeff and mini_cpt<80):
+	    mini_cpt+=1
+            LOSSES.append([[],'KL'])
+            global_L   = model.session.run(model.KL)
+	    LAYER_LOSS = []
+	    LAYER_GAIN = []
+	    for l in range(model.L-1):
+		l_,g_=model.E_step(l,init=0,random=random,fineloss=fineloss)
+		LAYER_LOSS.append(l_)
+		LAYER_GAIN.append(g_)
+            LOSSES[-1][0].append(concatenate(LAYER_LOSS))
+	    LAYER_GAIN = sum(LAYER_GAIN)
+	    GAINS.append([LAYER_GAIN,'KL'])
+            print "E",LAYER_GAIN,">",rcoeff
+        LAYER_GAIN      = 2*rcoeff
+        while(LAYER_GAIN>rcoeff):
+            LOSSES.append([[],'LIKE'])
+            LAYER_LOSS = []
+            LAYER_GAIN = []
+            for l in range(model.L-1):
+                l_,g_=model.M_step(l,random=random,fineloss=fineloss,local=cpt>0,dob=dob)
+                LAYER_LOSS.append(l_)
+                LAYER_GAIN.append(g_)
+            LOSSES[-1][0].append(concatenate(LAYER_LOSS))
+            LAYER_GAIN = sum(LAYER_GAIN)
+            GAINS.append([LAYER_GAIN,'LIKE'])
+            print "M",LAYER_GAIN,">",rcoeff
+    return LOSSES,GAINS
+
+
+def train_layer_model(model,rcoeff,CPT,random=0,fineloss=1,return_time=0,dob=1,doU=1):
+    cpt             = 0
+    LOSSES          = []
+    GAINS           = []
+    inittime=time.time()
+    timings = []
+    print "INIT",model.session.run(model.KL),model.session.run(model.like)
     while(cpt<CPT):
         print cpt
-        newtime = time.time()
-        cpt  += 1
-        lcpt  = 0
-        ########################################### E STEP
-        L        = rcoeff*2
-        global_L = 0
-        while((L-global_L)>rcoeff and lcpt<CPT/3):
-            LOSSES.append([[],'KL'])
-            global_L  = model.session.run(model.KL)
-            LOSSES[-1][0].append(model.E_step(random=random,fineloss=fineloss))
-            L = LOSSES[-1][0][-1][-1] # TAKE THE LAST KL VALUE
-            print "E",(L-global_L),">",rcoeff
-        ########################################### M STEP
-        global_global_L=model.session.run(model.like)
-        L        = rcoeff*2
-        global_L = 0
-        lcpt     = 0
-	SIGMAS.append(model.session.run([l.sigmas2 for l in model.layers[1:]]+[model.layers[-1].next_sigmas2]))
-	LAST_M.append(model.session.run(model.layers[-1].next_m))
-        while((L-global_L)>rcoeff and lcpt<CPT):
-            LOSSES.append([[],'LIKE'])
-            lcpt+=1
-            global_L = model.session.run(model.like)
-            LOSSES[-1][0].append(model.M_step(random=random,fineloss=fineloss,local=1))
-            L = LOSSES[-1][0][-1][-1] # TAKE THE LAST LIKE VALUE
-            print "M",(L-global_L),">",rcoeff
-        print "GLOBAL",(L-global_global_L),">",rcoeff
-        timings.append(time.time()-newtime)
-    print "TRAINING DONE IN ",time.time()-inittime
-    TORETURN = [LOSSES]
-    if(return_time):
-        TORETURN+=[timings]
-    if(return_infos):
-	TORETURN+=[SIGMAS,LAST_M]
-    return TORETURN
+        cpt         += 1
+	l,g = model.E_step(rcoeff=rcoeff,random=random,fineloss=fineloss)
+	GAINS.append([g,'KL'])
+        LOSSES.append([l,'KL'])
+        l,g = model.M_step(rcoeff=rcoeff,random=random,fineloss=fineloss,dob=dob,doU=doU)
+        GAINS.append([g,'LIKE'])
+        LOSSES.append([l,'LIKE'])
+    return LOSSES,GAINS
 
 
 
@@ -431,7 +465,7 @@ def load_data(DATASET):
         n_epochs = 150
   
 #    x_train          -= x_train.mean((1,2,3),keepdims=True)
-    x_train          /= abs(x_train).max((1,2,3),keepdims=True)#/10
+    x_train          /= abs(x_train).max((1,2,3),keepdims=True)
 #    x_test           -= x_test.mean((1,2,3),keepdims=True)
     x_test           /= abs(x_test).max((1,2,3),keepdims=True)
     x_train           = x_train.astype('float32')
