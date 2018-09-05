@@ -22,9 +22,10 @@ def plotclasses(classes,samplesclass1):
 
 
 
-def doit(unsup,neurons,BN,U):
-    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_fc_'+str(unsup)+'_'+str(neurons)+'_'+str(BN)+'_'+str(U)+'.pkl','rb')
-    LOSSES,reconstruction,x,samplesclass0,samplesclass1,samples1,W,b,sigmas=cPickle.load(f)
+def doit(sup,neurons,sigma,bb,U):
+    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_fc_'+str(sup)+'_'+str(neurons)+'_'+sigma+'_'+bb+'_'+U+'.pkl','rb')
+    LOSSES,reconstruction,x,samplesclass0,samplesclass1,samples1,W,sigmas,accu=cPickle.load(f)
+    print accu
     f.close()
 
     for s in xrange(len(reconstruction)):
@@ -39,7 +40,7 @@ def doit(unsup,neurons,BN,U):
             xticks([])
             yticks([])
         tight_layout()
-        savefig('BASE_EXP/fc_reconstruction_unsup'+str(unsup)+'_neurons'+str(neurons)+'_'+str(BN)+'_'+str(U)+'_step'+str(s)+'.png')
+        savefig('BASE_EXP/fc_reconstruction_sup'+str(sup)+'_'+str(neurons)+'_'+sigma+'_'+bb+'_'+U+'_step'+str(s)+'.png')
         close()
 
 #        figure(figsize=(15,3))
@@ -53,7 +54,7 @@ def doit(unsup,neurons,BN,U):
         classes=range(10)
         plotclasses(classes,samplesclass1[s])
         tight_layout()
-        savefig('BASE_EXP/fc_tenclass1_unsup'+str(unsup)+'_neurons'+str(neurons)+'_'+str(BN)+'_'+str(U)+'_step'+str(s)+'.png')
+        savefig('BASE_EXP/fc_tenclass1_sup'+str(sup)+'_'+str(neurons)+'_'+sigma+'_'+bb+'_'+U+'_step'+str(s)+'.png')
         close()
 
 #        figure(figsize=(15,3))
@@ -67,7 +68,7 @@ def doit(unsup,neurons,BN,U):
         classes=range(10)
         plotclasses(classes,samplesclass0[s])
         tight_layout()
-        savefig('BASE_EXP/fc_tenclass0_unsup'+str(unsup)+'_neurons'+str(neurons)+'_'+str(BN)+'_'+str(U)+'_step'+str(s)+'.png')
+        savefig('BASE_EXP/fc_tenclass0_sup'+str(sup)+'_'+str(neurons)+'_'+sigma+'_'+bb+'_'+U+'_step'+str(s)+'.png')
         close()
 
     figure(figsize=(15,3))
@@ -82,25 +83,12 @@ def doit(unsup,neurons,BN,U):
         yticks([])
 
     tight_layout()
-    savefig('BASE_EXP/fc_W_unsup'+str(unsup)+'_neurons'+str(neurons)+'_'+str(BN)+'_'+str(U)+'.png')
+    savefig('BASE_EXP/fc_W_sup'+str(sup)+'_'+str(neurons)+'_'+sigma+'_'+bb+'_'+U+'.png')
     close()
 
-
-doit(0,2,1,0)
-doit(0,2,0,1)
-doit(0,2,1,1)
-#doit(0,4,1,0)
-
-#doit(0,64,0,0)
-#doit(0,64,0,1)
-#doit(0,64,1,1)
-
-
-#doit(0,64)
-#doit(1,16)
-#doit(1,64)
-
-#show()
+doit(1,2,'local','none','none')
+#doit(1,1,'local','none','none')
+doit(1,3,'local','none','none')
 
 
 

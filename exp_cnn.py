@@ -11,14 +11,14 @@ import cPickle
 
 DATASET = 'MNIST'
 
-supervised=int(sys.argv[-2])
-modeln    = int(sys.argv[-1])
+modeln     = int(sys.argv[-1])
+supervised = int(sys.argv[-2])
 
 x_train,y_train,x_test,y_test = load_data(DATASET)
 
 
-pp = permutation(x_train.shape[0])[:1000]
-XX = x_train[pp]+randn(len(pp),1,28,28)*0.1
+pp = permutation(x_train.shape[0])[:2000]
+XX = x_train[pp]+randn(len(pp),1,28,28)*0.05
 YY = y_train[pp]
 
 XX = transpose(XX,[0,2,3,1])
@@ -31,10 +31,10 @@ if(modeln==0):
 	layers1.append(FinalLayer(layers1[-1],10))
 elif(modeln==1):
         layers1 = [InputLayer(input_shape)]
-        layers1.append(ConvPoolLayer(layers1[-1],Ic=3,Jc=3,Ir=2,Jr=2,K=8,R=2,nonlinearity=None,sparsity_prior=0.0,batch_norm=BatchNorm(scale=0,center=0),sigma='local'))
-        layers1.append(ConvPoolLayer(layers1[-1],Ic=3,Jc=3,Ir=2,Jr=2,K=16,R=2,nonlinearity=None,sparsity_prior=0.0,batch_norm=BatchNorm(scale=0,center=0),sigma='local'))
-        layers1.append(DenseLayer(layers1[-1],K=64,R=2,nonlinearity=None,sparsity_prior=0.,batch_norm=BatchNorm(scale=0,center=0),sigma='local'))
-        layers1.append(FinalLayer(layers1[-1],10,sparsity_prior=0.0,batch_norm=BatchNorm(scale=0,center=0),sigma='local'))
+        layers1.append(ConvPoolLayer(layers1[-1],Ic=5,Jc=5,Ir=2,Jr=2,K=4,R=2,nonlinearity=None,sparsity_prior=0.0,sigma='local'))
+#        layers1.append(ConvPoolLayer(layers1[-1],Ic=3,Jc=3,Ir=2,Jr=2,K=8,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='channel'))
+        layers1.append(DenseLayer(layers1[-1],K=32,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='local'))
+        layers1.append(FinalLayer(layers1[-1],10,sparsity_prior=0.00,sigma='local'))
 else:
 	layers1 = [InputLayer(input_shape)]
 	layers1.append(ConvPoolLayer(layers1[-1],Ic=5,Jc=5,Ir=3,Jr=3,K=16,R=2,nonlinearity=None,sparsity_prior=0.0))
@@ -51,7 +51,7 @@ else:
         model1.init_dataset(XX)
 
 #init_model(model1,CPT=10)
-LOSSES  = train_layer_model(model1,rcoeff=4.,CPT=300,random=0,fineloss=0,dob=0,doU=0)
+LOSSES  = train_layer_model(model1,rcoeff=0.01,CPT=150,random=0,fineloss=0)
 reconstruction = model1.reconstruct()[:150]
 samplesclass1  = [model1.sampleclass(int(k<4),k)[:300] for k in xrange(10)]
 samples1       = model1.sample(1)
