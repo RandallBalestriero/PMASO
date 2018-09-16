@@ -107,8 +107,8 @@ def doit(l):
 
 
 #doit(5)
-doit(4)
-doit(3)
+doit(1)
+#doit(3)
 doit(2)
 
 #doit(1,1,'local','none','none')

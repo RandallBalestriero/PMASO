@@ -1,5 +1,8 @@
-#python exp_fc.py 0 1 local local local;
-python exp_neurons.py 1;
-python exp_neurons.py 2;
-python exp_neurons.py 3;
+#python exp_neurons.py local 1;
+#python exp_neurons.py global 1;
+#python exp_neurons.py local 2;
+#python exp_neurons.py global 2;
+
+python exp_neurons.py local 3;
+python exp_neurons.py global 3;
 

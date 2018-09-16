@@ -22,15 +22,9 @@ def plotclasses(classes,samplesclass1):
 
 
 
-def doit():
-    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_unsup_32.pkl','rb')
+def doit(k):
+    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_unsup_'+str(k)+'.pkl','rb')
     LOSSES0,reconstruction0,x0,samplesclass00,samplesclass10,samples10,W0,sigmas0,pred0=cPickle.load(f)
-    f.close()
-    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_unsup_16.pkl','rb')
-    LOSSES1,reconstruction1,x1,samplesclass01,samplesclass11,samples11,W1,sigmas1,pred1=cPickle.load(f)
-    f.close()
-    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_unsup_10.pkl','rb')
-    LOSSES2,reconstruction2,x2,samplesclass02,samplesclass12,samples12,W2,sigmas2,pred2=cPickle.load(f)
     f.close()
     figure(figsize=(15,3))
     for i in xrange(6):
@@ -43,36 +37,8 @@ def doit():
         xticks([])
         yticks([])
     tight_layout()
-    savefig('BASE_EXP/unsup/reconstruction_0.png')
+    savefig('BASE_EXP/unsup/reconstruction_'+str(k)+'.png')
     close()
-    figure(figsize=(15,3))
-    for i in xrange(6):
-        subplot(2,6,1+i)
-        imshow(x1[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-        subplot(2,6,7+i)
-        imshow(reconstruction1[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-    tight_layout()
-    savefig('BASE_EXP/unsup/reconstruction_1.png')
-    close()
-    figure(figsize=(15,3))
-    for i in xrange(6):
-        subplot(2,6,1+i)
-        imshow(x2[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-        subplot(2,6,7+i)
-        imshow(reconstruction2[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-    tight_layout()
-    savefig('BASE_EXP/unsup/reconstruction_2.png')
-    close()
-
-
 
 #        figure(figsize=(15,3))
 #        classes=[0]
@@ -85,21 +51,7 @@ def doit():
     classes=range(32)
     plotclasses(classes,samplesclass10)
     tight_layout()
-    savefig('BASE_EXP/unsup/tenclass1_0.png')
-    close()
-
-    figure(figsize=(15,15))
-    classes=range(16)
-    plotclasses(classes,samplesclass11)
-    tight_layout()
-    savefig('BASE_EXP/unsup/tenclass1_1.png')
-    close()
-
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass12)
-    tight_layout()
-    savefig('BASE_EXP/unsup/tenclass1_2.png')
+    savefig('BASE_EXP/unsup/tenclass1_'+str(k)+'.png')
     close()
 
 
@@ -114,30 +66,13 @@ def doit():
     classes=range(32)
     plotclasses(classes,samplesclass00)
     tight_layout()
-    savefig('BASE_EXP/unsup/tenclass0_0.png')
+    savefig('BASE_EXP/unsup/tenclass0_'+str(k)+'.png')
     close()
-    figure(figsize=(15,15))
-    classes=range(16)
-    plotclasses(classes,samplesclass01)
-    tight_layout()
-    savefig('BASE_EXP/unsup/tenclass0_1.png')
-    close()
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass02)
-    tight_layout()
-    savefig('BASE_EXP/unsup/tenclass0_2.png')
-    close()
-
-    figure(figsize=(15,15))
-    plot(LOSSES0,c='blue')
-    plot(LOSSES1,c='black')
-    plot(LOSSES2,c='red')
-    savefig('BASE_EXP/unsup/losses.png')
-    close()
+    return LOSSES0
 
 
 
-doit()
+
+l=doit(32)
 
 

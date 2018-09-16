@@ -11,7 +11,7 @@ import cPickle
 
 DATASET = 'MNIST'
 
-sigmass   = 'local'
+sigmass   = 'global'
 supss     = 1
 residual  = int(sys.argv[-1])
 n_layers  = int(sys.argv[-2])
@@ -27,10 +27,10 @@ x_test = transpose(x_test,[0,2,3,1])
 input_shape = XX.shape
 
 layers1 = [InputLayer(input_shape)]
-layers1.append(DenseLayer(layers1[-1],K=32,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='local',learn_pi=1,p_drop=0.))
+layers1.append(DenseLayer(layers1[-1],K=64,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='local',learn_pi=1,p_drop=0.,bn=BN(0,0),U=0))
 for l in xrange(n_layers):
-	layers1.append(DenseLayer(layers1[-1],K=32,R=2,nonlinearity=None,sparsity_prior=0.00,sigma=sigmass,learn_pi=1,p_drop=0.,residual=residual))
-layers1.append(FinalLayer(layers1[-1],10,sparsity_prior=0.00,sigma='local'))
+	layers1.append(DenseLayer(layers1[-1],K=64,R=2,nonlinearity=None,sparsity_prior=0.00,sigma=sigmass,learn_pi=1,p_drop=0.,residual=residual,bn=BN(0,0),U=0))
+layers1.append(FinalLayer(layers1[-1],10,sparsity_prior=0.00,sigma='local',bn=BN(0,0)))
 
 model1 = model(layers1)
 
@@ -40,7 +40,7 @@ else:
     model1.init_dataset(XX)
 
 
-LOSSES  = train_layer_model(model1,rcoeff=0.01,CPT=600,random=1,fineloss=0)
+LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(0.00000000001,'linear'),CPT=200,random=0,fineloss=0,verbose=0)
 reconstruction=model1.reconstruct()[:150]
 samplesclass0=[model1.sampleclass(0,k)[:150] for k in xrange(10)]
 samplesclass1=[model1.sampleclass(1,k)[:150] for k in xrange(10)]

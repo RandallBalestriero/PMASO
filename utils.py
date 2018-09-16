@@ -17,6 +17,16 @@ from random import shuffle
 #
 #############################################################################################
 
+class schedule:
+    def __init__(self,lr_,opt):
+	self.lr_ = lr_
+	self.opt = opt
+    def lr(self,t):
+	if(self.opt=='linear'):
+	    return self.lr_
+	elif(self.opt=='sqrt'):
+	    return self.lr_/sqrt(1+t)
+
 
 
 
@@ -99,20 +109,13 @@ class model:
         self.inity              = tf.assign(self.layers[-1].p_,tf.expand_dims(tf.one_hot(self.y,self.layers[-1].R),0))
         self.initop_thetaq_random  = [l.init_thetaq() for l in layers[1:]]
         ### WEIGHTS UPDATES OP
+	self.updates_BV      = [l.update_BV() for l in layers[1:]]
         self.updates_m       = [l.update_m() for l in layers[1:-1]]
-        self.updates_p       = [l.update_p() for l in layers[1:-1]]
-        self.updates_rho     = [l.update_rho() for l in layers[1:-1]]
 	self.updates_v2      = [l.update_v2() for l in layers[1:-1]]
 	self.update_last_p   = layers[-1].update_p() # SEPARATE DEPENDING ON SUP UNSUP TRAINING
-#self.updates_DD      = [l.update_DD() for l in layers[1:]]
-        self.updates_d       = [l.update_dropout() for l in layers[1:-1]]
-#self.updates_U       = [l.update_U() for l in layers[1:]]
-#        self.updates_sigma_global = update_sigma(layers,0)
         self.updates_sigma   = [l.update_sigma() for l in layers[1:]]
         self.updates_Wk      = [l.update_Wk() for l in layers[1:]]
         self.updates_pi      = [l.update_pi() for l in layers[1:]]
-	self.updates_V       = [l.update_V() for l in layers[1:]]
-#       self.updates_b       = [l.update_b() for l in layers[1:]]
         ## GATHER LOSSES
         self.KL              = KL(layers)
         self.like            = likelihood(layers)
@@ -132,15 +135,14 @@ class model:
 	    else:
                 Ws.append(self.session.run(l.W))
 	return Ws
-    def layer_E_step(self,lay,random=1,fineloss=1):
+    def layer_E_step(self,lay,random=1,fineloss=1,verbose=0):
         loss = []
 	l    = lay
         GAIN = self.session.run(self.KL)
-        print 'BEFORE',l,GAIN,
 	if(l<len(self.updates_v2)):
             t = time.time()
             self.session.run(self.updates_v2[lay])
-            print 'AFTER V2',l,self.session.run(self.KL),self.session.run(self.like),time.time()-t,
+            if(verbose): print 'V2',l,self.session.run(self.KL)
         if(random==0):
             iih = self.layers[l+1].m_indices
         else:
@@ -156,27 +158,7 @@ class model:
                     t=time.time()
                     L = self.session.run(self.KL)
                     loss.append(L)
-            print 'AFTER CONV ',str(l),' M',self.session.run(self.KL),self.session.run(self.like),time.time()-t,
-#	    t = time.time()
-#            for i in iih:
-#                self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
-#                                                                        self.layers[l+1].j_:int32(i[1]),
-#                                                                        self.layers[l+1].k_:int32(i[2])})
-#                if(fineloss):
-#                    t=time.time()
-#                    L = self.session.run(self.KL)
-#                    loss.append(L)
-#            print 'AFTER CONV P',self.session.run(self.KL),time.time()-t,
-#	    t = time.time()
-#            for i in iih:
-#                self.session.run(self.updates_rho[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
-#                                                                        self.layers[l+1].j_:int32(i[1]),
-#                                                                        self.layers[l+1].k_:int32(i[2])})
-#                if(fineloss):
-#                    t=time.time()
-#                    L = self.session.run(self.KL)
-#                    loss.append(L)
-#            print 'AFTER RHO',self.session.run(self.KL),time.time()-t
+            if(verbose): print 'M',l,self.session.run(self.KL)
 	elif(isinstance(self.layers[l+1],layers_.DenseLayer)):
             for i in iih:
 		self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].k_:int32(i)})
@@ -184,40 +166,24 @@ class model:
                     t=time.time()
                     L = self.session.run(self.KL)
                     loss.append(L)
-            print 'AFTER DENS ',str(l),' M',self.session.run(self.KL),self.session.run(self.like)
-#	    for i in iih:
-#                self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].k_:int32(i)})
-#                if(fineloss):
-#                    t=time.time()
-#                    L = self.session.run(self.KL)
-#                    loss.append(L)
-#            print 'AFTER DENS P',self.session.run(self.KL),
-#            for i in iih:
-#               self.session.run(self.updates_d[l],feed_dict={self.layers[l+1].k_:int32(i)})
-#                if(fineloss):
-#                    t=time.time()
-#                    L = self.session.run(self.KL)
-#                    loss.append(L)
-#            print 'AFTER DENS D',self.session.run(self.KL)
+            if(verbose): print 'M',l,self.session.run(self.KL)
 	else:
 	    if(self.hold_last_p==0):
 	        self.session.run(self.update_last_p)
 	        L = self.session.run(self.KL)
 	        loss.append(L)
-#                print 'AFTER LAST P',self.session.run(self.KL)
+                if(verbose): print 'P',l,self.session.run(self.KL)
         L = self.session.run(self.KL)
-#	GAIN = L-GAIN
         return L-GAIN
-    def layer_M_step(self,lay,random=1,fineloss=1):
+    def layer_M_step(self,lay,random=1,fineloss=1,verbose=0):
         loss = []
 	l    = lay
 	GAIN = self.session.run(self.like)
-        print 'BEFORE M',GAIN
+	if(verbose): print 'BEFORE M ',str(l),GAIN
         self.session.run(self.updates_sigma[l])
- #       L = self.session.run(self.like)
-        print 'AFTER SIGMA ',str(l),self.session.run(self.like)
-        self.session.run(self.updates_V[l])
-#        print 'AFTER V',self.session.run(self.like)
+        if(verbose): print 'SIGMA ',str(l),self.session.run(self.like)
+        self.session.run(self.updates_BV[l])
+	if(verbose): print 'BV',self.session.run(self.like)
         if(random==0):
             iih = self.layers[l+1].W_indices
         else:
@@ -232,7 +198,7 @@ class model:
                     t=time.time()
                     L = self.session.run(self.like)
                     loss.append(L)
-            print 'AFTER DENS ',str(l),' W',self.session.run(self.like)
+	    if(verbose): print 'DW',self.session.run(self.like)
         elif(isinstance(self.layers[l+1],layers_.ConvPoolLayer)):
             t=time.time()
             for kk in iih:
@@ -244,82 +210,57 @@ class model:
                     t=time.time()
                     L = self.session.run(self.like)
                     loss.append(L)
-            newtime = time.time()-t
-            print 'AFTER CONV W',self.session.run(self.like),newtime
+	    if(verbose): print 'CW',self.session.run(self.like),
         else:# LAST LAYER
             self.session.run(self.updates_Wk[-1])
             if(fineloss):
                 L = self.session.run(self.like)
                 loss.append(L)
-            print 'AFTER LAST W',self.session.run(self.like)
-#        self.session.run(self.updates_b[l])
-#        if(fineloss):
-#            L = self.session.run(self.like)
-#            loss.append(L)
-#        print 'AFTER BBBBB',self.session.run(self.like)
+	    if(verbose): print 'LW',self.session.run(self.like),
         self.session.run(self.updates_pi[l])
-        print 'AFTER PI',self.session.run(self.like)
+	if(verbose): print 'PI',self.session.run(self.like)
         if(fineloss):
             L = self.session.run(self.like)
             loss.append(L) 
-#        self.session.run(self.updates_sigma[l])
         L = self.session.run(self.like)
-#	GAIN = L-GAIN
-#        print 'AFTER SIGMA',self.session.run(self.like)
         return L-GAIN
-    def E_step(self,rcoeff,fineloss=0,random=0):
+    def E_step(self,rcoeff,fineloss=0,random=0,verbose=0):
         GAINS      = 0
-#	LAYER_LOSS = []
 	LAYER_GAIN =rcoeff*2
 	mini_cpt   = 0
+        print 'Beginning of E-step...',self.session.run(self.KL),self.session.run(self.like)
         while(LAYER_GAIN>rcoeff and mini_cpt<80):
             mini_cpt  +=1
             LAYER_GAIN = 0
             for l in range(self.L-1):
-                layer_cpt,g_ = 0,rcoeff
-#		self.session.run(self.updates_DD[l:])
-                while(g_>rcoeff/(self.L-1.0) and layer_cpt<40):
+                layer_cpt,g_ = 0,rcoeff+1
+                while(g_>rcoeff and layer_cpt<40):
                     layer_cpt += 1
-                    l_,g_=self.layer_E_step(l,random=random,fineloss=fineloss)
-#                    LAYER_LOSS.append(l_)
+                    g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose)
                     LAYER_GAIN+=g_
-                    print "E,",l,'       ',g_,">",rcoeff/(self.L-1)
+#                    print "gain:",g_,">",rcoeff/(self.L-1)
 	    GAINS+= LAYER_GAIN
 	return GAINS
-    def M_step(self,rcoeff,fineloss=0,random=0):
-#        LAYER_LOSS = []
+    def M_step(self,rcoeff,fineloss=0,random=0,verbose=0):
         GAINS = 0
+	print 'Beginning of M-step...',self.session.run(self.like),self.session.run(self.KL)
         for l in range(self.L-1):
             layer_cpt,g_ = 0,rcoeff
             while(g_>rcoeff/(self.L-1.0) and layer_cpt<40):
-                g_=self.layer_M_step(l,random=random,fineloss=fineloss)
-#                LAYER_LOSS.append(l_)
+                g_=self.layer_M_step(l,random=random,fineloss=fineloss,verbose=verbose)
                 GAINS+=g_
-#                print "M,",l,'          ',g_,">",rcoeff/(self.L-1)
 	return GAINS
     def E_step2(self,rcoeff,fineloss=0,random=0):
         GAINS      = 0
-#	LAYER_LOSS = []
-	LAYER_GAIN =rcoeff*2
-	mini_cpt   = 0
-        while(LAYER_GAIN>rcoeff and mini_cpt<80):
-            mini_cpt  +=1
-            LAYER_GAIN = 0
-	    g = rcoeff+1
-	    layer_cpt = 0
-            while(g>rcoeff and layer_cpt<40):
-		layer_cpt+=1
-		g=0
-#		self.session.run(self.updates_DD[l:])
-                for l in range(self.L-1):
-#		    print l,l
-                    g_=self.layer_E_step(l,random=random,fineloss=fineloss)
-#                    LAYER_LOSS.append(l_)
-                    g+=g_
-#                    print "E,",l,'       ',g_
-	    LAYER_GAIN+=g
-	    GAINS+= LAYER_GAIN
-	return GAINS
+        g = rcoeff+1
+        layer_cpt = 0
+        while(g>rcoeff and layer_cpt<40):
+	    layer_cpt+=1
+	    g=0
+            for l in range(self.L-1):
+                g_=self.layer_E_step(l,random=random,fineloss=fineloss)
+                g+=g_
+	return g#GAINS
     def init_dataset(self,x,y=None):
         """this function initializes the variable of the
         first layer with x and possibly the last layer
@@ -348,10 +289,10 @@ class model:
     def reconstruct(self):
         return self.session.run(self.samplet)
     def predict(self):
-        return self.session.run(self.layers[-1].p_)[0]
+        return squeeze(self.session.run(self.layers[-1].p_))
 
 
-def train_layer_model(model,rcoeff,CPT,random=0,fineloss=1,return_time=0):
+def train_layer_model(model,rcoeff_schedule,CPT,random=0,fineloss=1,return_time=0,verbose=0):
     cpt  = 0
     LIKE = [model.session.run(model.like)]
     GAIN = 1
@@ -359,9 +300,9 @@ def train_layer_model(model,rcoeff,CPT,random=0,fineloss=1,return_time=0):
     while(cpt<CPT and GAIN>0):
         print cpt
         cpt         += 1
-	g = model.E_step2(rcoeff=rcoeff,random=random,fineloss=fineloss)
+	g = model.E_step(rcoeff=rcoeff_schedule.lr(cpt),random=random,fineloss=fineloss,verbose=verbose)
 	print "AFTER E",model.session.run(model.KL)
-        g = model.M_step(rcoeff=rcoeff,random=random,fineloss=fineloss)
+        g = model.M_step(rcoeff=rcoeff_schedule.lr(cpt),random=random,fineloss=fineloss,verbose=verbose)
 	LIKE.append(model.session.run(model.like))
         print "AFTER M",LIKE[-3:]
 	GAIN = g#LIKE[-1]-LIKE[-2]
@@ -388,7 +329,7 @@ from sklearn.cross_validation import train_test_split
 
 
 
-def load_data(DATASET):
+def load_data(DATASET,k=-1):
     if(DATASET=='MNIST'):
         batch_size = 50
         mnist         = fetch_mldata('MNIST original')
@@ -409,9 +350,12 @@ def load_data(DATASET):
         input_shape       = (batch_size,32,32,3)
         x_train = transpose(x_train,[0,2,3,1])
         x_test  = transpose(x_test,[0,2,3,1])
-	c=10
-        n_epochs = 150
-
+#	c=10
+#        n_epochs = 150
+#        iii = [i for i in xrange(len(y_train)) if(y_train[i]==0)]
+	if(k>=0):
+	    x_train = x_train[y_train==k]
+	    y_train = y_train[y_train==k]
     elif(DATASET == 'CIFAR100'):
 	batch_size = 100
         TRAIN,TEST = load_cifar100(3)
@@ -443,10 +387,10 @@ def load_data(DATASET):
         x_test  = transpose(x_test,[0,2,3,1])
 	c=10
         n_epochs = 150
-  
-#    x_train          -= x_train.mean((1,2,3),keepdims=True)
+    if(DATASET=='CIFAR'):
+        x_train          -= x_train.mean((1,2,3),keepdims=True)
+        x_test           -= x_test.mean((1,2,3),keepdims=True)
     x_train          /= abs(x_train).max((1,2,3),keepdims=True)
-#    x_test           -= x_test.mean((1,2,3),keepdims=True)
     x_test           /= abs(x_test).max((1,2,3),keepdims=True)
     x_train           = x_train.astype('float32')
     x_test            = x_test.astype('float32')
@@ -474,7 +418,7 @@ def zca_whitening(x, principal_components):
 
 def load_imagenet():
         import scipy.misc
-        classes = glob.glob('../../DATASET/tiny-imagenet-200/train/*')
+        classes = glob.glob('../DATASET/tiny-imagenet-200/train/*')
         x_train,y_train = [],[]
         cpt=0
         for c,name in zip(range(200),classes):
@@ -489,10 +433,10 @@ def load_imagenet():
 
 def load_svhn():
         import scipy.io as sio
-        train_data = sio.loadmat('../../DATASET/train_32x32.mat')
+        train_data = sio.loadmat('../DATASET/train_32x32.mat')
         x_train = train_data['X'].transpose([3,2,0,1]).astype('float32')
         y_train = concatenate(train_data['y']).astype('int32')-1
-        test_data = sio.loadmat('../../DATASET/test_32x32.mat')
+        test_data = sio.loadmat('../DATASET/test_32x32.mat')
         x_test = test_data['X'].transpose([3,2,0,1]).astype('float32')
         y_test = concatenate(test_data['y']).astype('int32')-1
         print y_test
@@ -543,7 +487,7 @@ def load_mnist():
         return [concatenate([data[0][0],data[1][0]]).reshape(60000,1,28,28),concatenate([data[0][1],data[1][1]])],[data[2][0].reshape(10000,1,28,28),data[2][1]]
 
 def load_cifar(channels=1):
-        path = '../../DATASET/cifar-10-batches-py/'
+        path = '../DATASET/cifar-10-batches-py/'
         x_train = []
         y_train = []
         x_test = []
@@ -560,7 +504,7 @@ def load_cifar(channels=1):
 
 
 def load_cifar100(channels=1):
-        path = '../../DATASET/cifar-100-python/'
+        path = '../DATASET/cifar-100-python/'
         PP = unpickle100(path+'train',1,channels)
         x_train = PP[0]
         y_train = PP[1]
