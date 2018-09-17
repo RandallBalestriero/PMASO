@@ -2,6 +2,11 @@ import cPickle
 from pylab import *
 import glob
 import matplotlib as mpl
+
+import os
+SAVE_DIR = os.environ['SAVE_DIR']
+
+
 label_size = 13
 mpl.rcParams['xtick.labelsize'] = label_size+10
 mpl.rcParams['ytick.labelsize'] = label_size
@@ -26,7 +31,7 @@ def plotclasses(classes,samplesclass1):
 
 
 def doit(sig,l,k):
-    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_cifar_'+sig+'_'+str(l)+'_'+str(k)+'.pkl','rb')
+    f=open(SAVE_DIR+'exp_cifar_'+sig+'_'+str(l)+'_'+str(k)+'.pkl','rb')
     LOSSES1,reconstruction1,x1,samplesclass01,samplesclass11,W1=cPickle.load(f)
     f.close()
     figure(figsize=(20,2))
@@ -51,7 +56,7 @@ def doit(sig,l,k):
         close()
     for n in xrange(150):
         figure(figsize=(3,3))
-        imshow(normalize(samplesclass11[-5][0][n]),aspect='auto',interpolation='nearest')
+        imshow(normalize(samplesclass11[-1][0][n]),aspect='auto',interpolation='nearest')
         xticks([])
         yticks([])
         tight_layout()
@@ -68,7 +73,7 @@ def doit(sig,l,k):
     return concatenate(LOSSES1)
 
 
-for c in [5]:
+for c in [7,8,9]:
 	loss1 = doit('local',3,c)
 	loss2 = doit('global',3,c)
         loss3 = doit('local',2,c)

@@ -2,6 +2,11 @@ import cPickle
 from pylab import *
 import glob
 import matplotlib as mpl
+import os
+SAVE_DIR = os.environ['SAVE_DIR']
+
+
+
 label_size = 13
 mpl.rcParams['xtick.labelsize'] = label_size+10
 mpl.rcParams['ytick.labelsize'] = label_size
@@ -23,10 +28,10 @@ def plotclasses(classes,samplesclass1):
 
 
 def doit(l):
-    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_resnet_0_'+str(l)+'.pkl','rb')
+    f=open(SAVE_DIR+'exp_resnet_0_'+str(l)+'.pkl','rb')
     LOSSES0,reconstruction0,x0,samplesclass00,samplesclass10,samples10,W0,sigmas0=cPickle.load(f)
     f.close()
-    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_resnet_1_'+str(l)+'.pkl','rb')
+    f=open(SAVE_DIR+'exp_resnet_1_'+str(l)+'.pkl','rb')
     LOSSES1,reconstruction1,x1,samplesclass01,samplesclass11,samples11,W1,sigmas1=cPickle.load(f)
     f.close()
     figure(figsize=(15,3))

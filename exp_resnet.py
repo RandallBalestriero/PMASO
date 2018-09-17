@@ -8,6 +8,8 @@ from layers import *
 from utils import *
 
 import cPickle
+import os
+SAVE_DIR = os.environ['SAVE_DIR']
 
 DATASET = 'MNIST'
 
@@ -49,7 +51,7 @@ sigmas=model1.get_sigmas()
 
 W = model1.get_Ws()
 
-f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_resnet_'+str(residual)+'_'+str(n_layers)+'.pkl','wb')
+f=open(SAVE_DIR+'exp_resnet_'+str(residual)+'_'+str(n_layers)+'.pkl','wb')
 cPickle.dump([LOSSES,reconstruction,XX[:150],samplesclass0,samplesclass1,samples1,W,sigmas],f)
 f.close()
 

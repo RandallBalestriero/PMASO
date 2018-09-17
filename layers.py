@@ -160,7 +160,7 @@ class DenseLayer:
 		else: k3 = 0
                 k1  = -tf.reduce_sum(tf.log(self.sigmas2_))/2
                 k2  = tf.einsum('knr,kr->',self.p_,tf.log(self.pi))/float32(self.bs)
-                a1  = -tf.reduce_mean(tf.square((self.input_-self.b)-self.backward(1)),0)
+                a1  = -tf.reduce_mean(tf.square(self.input_-self.b-self.backward(1)),0)
                 a2  = -tf.reshape(tf.reduce_mean(self.input_layer.v2,0),[self.D_in])
                 a3  = tf.reduce_sum(tf.square(tf.einsum('krd,knr,kn->kdn',self.W,self.p_,self.m_*self.drop_[:,1])),[0,2])/float32(self.bs)
                 a4  = -tf.einsum('kr,krd->d',tf.einsum('kn,knr->kr',self.drop_[:,1]*(self.v2_+tf.square(self.m_)),self.p_)/float32(self.bs),tf.square(self.W))
@@ -169,7 +169,7 @@ class DenseLayer:
 		if(self.p_drop>0):
                     return self.likelihood()+(-tf.reduce_sum(self.p_*tf.log(self.p_))+tf.reduce_sum(tf.log(self.v2_))*float32(0.5)-tf.reduce_sum(self.drop_*tf.log(self.drop_+eps)))/float32(self.bs)
 		else:
-                    return self.likelihood()-(-tf.reduce_sum(self.p_*tf.log(self.p_))+tf.reduce_sum(tf.log(self.v2_))*float32(0.5))/float32(self.bs)
+                    return self.likelihood()+(-tf.reduce_sum(self.p_*tf.log(self.p_))+tf.reduce_sum(tf.log(self.v2_))*float32(0.5))/float32(self.bs)
 #                                           ----      UPDATES      -----
         def update_v2(self):
                 a40 = self.drop_[:,1]*tf.einsum('knr,krd,d->kn',self.p_,tf.square(self.W),1/self.sigmas2_)+tf.expand_dims(1/self.next_layer.sigmas2_,-1)#KN
@@ -194,17 +194,18 @@ class DenseLayer:
 		if(self.residual): k0 = tf.square(self.V_[self.k_])+2*self.V_[self.k_]*tf.einsum('r,nr->n',self.W[self.k_,:,self.k_],self.p_[self.k_])*self.drop_[self.k_,1]
 		else:              k0 = 0
                 new_m   = tf.scatter_update(self.m_,[k],[(priorm+proj)/(denomi+k0/self.sigmas2_[self.k_])])
+#		return new_m
 		## UPDATE P
-                reconstruction = self.input_-self.b-self.backwardmk(self.k_,1,m=new_m)                                           # (N D)
-                b       = tf.einsum('rd,n->nrd',Wk,new_m[k]*self.drop_[k,1])                                                    # (N R D)
-                forward = tf.tensordot(tf.square(tf.expand_dims(reconstruction,1)-b),1/(2*self.sigmas2_),[[2],[0]])                                 # ( N R )
+#                reconstruction = self.input_-self.b-self.backwardmk(self.k_,1)#we do not need new m cause the kth is not used !    # (N D)
+                b       = tf.einsum('rd,n->nrd',Wk,new_m[k]*self.drop_[k,1])                                                     # (N R D)
+                forward = tf.einsum('nd,nrd->nr',reconstruction/self.sigmas2,b)                                                            # (N R)
                 prior   = tf.expand_dims(tf.log(self.pi[k]),0)                                                                                  # (1 R)
-                v2      = tf.einsum('n,rd,d->nr',self.v2_[self.k_]*self.drop_[k,1],tf.square(Wk),1/(2*self.sigmas2_)) # (N R)
-                new_p   = tf.scatter_update(self.p_,[k],[mysoftmax(-forward+prior-v2,coeff=eps)])
+                v2      = tf.einsum('n,rd,d->nr',(tf.square(new_m[self.k_])+self.v2_[self.k_])*self.drop_[k,1],tf.square(Wk),1/(2*self.sigmas2_)) # (N R)
+                new_p   = tf.scatter_update(self.p_,[k],[mysoftmax(forward+prior-v2,coeff=eps)])
 		if(self.p_drop==0):
 		    return tf.group(new_m,new_p)
 		## UPDATE DROPOUT
-                reconstruction = self.input_-self.b-self.backwardmk(self.k_,1,m=new_m,p=new_p)                 # (N D)
+#                reconstruction = self.input_-self.b-self.backwardmk(self.k_,1,m=new_m,p=new_p)                 # (N D)
                 proj    = tf.einsum('nd,rd,nr->n',reconstruction,self.W[k]*tf.expand_dims(1/self.sigmas2_,0),self.p_[self.k_])*new_m[self.k_] # (N)
                 squared = tf.einsum('n,nr,rd,d->n',self.v2_[self.k_]+tf.square(new_m[self.k_]),self.p_[self.k_],tf.square(self.W[k]),1/self.sigmas2_) #(N)
                 filled0 = tf.fill([self.bs],tf.cast(tf.log(self.p_drop),tf.float32))
@@ -275,8 +276,8 @@ class ConvPoolLayer:
 		self.output_shape      = (self.conv_output_shape[0],self.conv_output_shape[1]/Ir,self.conv_output_shape[2]/Jr,self.conv_output_shape[3])
 		self.D_in              = prod(self.input_shape[1:])
                 self.I,self.J          = self.output_shape[1],self.output_shape[2]
-                self.input_small_patch = self.tensor2small_patch(self.input,with_n=1)
-                self.input_large_patch = self.tensor2large_patch(self.input,with_n=1)
+                self.input_small_patch = self.extract_small_patch(self.input,with_n=1)
+                self.input_large_patch = self.extract_large_patch(self.input,with_n=1)
                 self.pi_                 = PI_CONST
                 if(nonlinearity is None):
 		    init     = tf.random_normal_initializer(0,0.1)#tf.orthogonal_initializer()
@@ -292,12 +293,15 @@ class ConvPoolLayer:
                 self.pi      = tf.Variable(mysoftmax(tf.random_normal((K,R)),axis=1))
 		self.sigmas2_= tf.Variable(tf.ones((self.Iin,self.Jin,self.C)))
 		self.sigmas2 = tf.expand_dims(self.sigmas2_,0)
-                self.sigmas2_large_patch_= self.tensor2large_patch(self.sigmas2,with_n=0)
+                self.sigmas2_large_patch_= self.extract_large_patch(self.sigmas2,with_n=0)
 		self.sigmas2_large_patch = tf.expand_dims(self.sigmas2_large_patch_,0)
-                self.sigmas2_small_patch_= self.tensor2small_patch(self.sigmas2,with_n=0)
+                self.sigmas2_small_patch_= self.extract_small_patch(self.sigmas2,with_n=0)
 		self.sigmas2_small_patch = tf.expand_dims(self.sigmas2_small_patch_,0)
 		###############################   WE DEFINE SOME HELPER VARIABLES FOR LATER FUNCTIONS ###############################################
-                self.dx      = tf.zeros((self.bs,self.conv_output_shape[1],self.conv_output_shape[2],1)) # (N I' J' 1)
+                self.dx       = tf.zeros((self.bs,self.conv_output_shape[1],self.conv_output_shape[2],1)) # (N I' J' 1)
+#		self.input_sc = tf.zeros((self.bs,self.input_shape[1],self.input_shape[2],1))
+#		self.input_sc_small_patch = tf.reshape(tf.extract_image_patches(self.input_sc,(1,Ic,Jc,1),(1,1,1,1),(1,1,1,1),"VALID"),
+#						(self.bs,self.conv_output_shape[1],self.conv_outoput_shape[2],Ic,Jc)) # (N I' J' Ic Jc)
                 self.dxR     = tf.zeros((self.bs,self.conv_output_shape[1],self.conv_output_shape[2],self.R)) # (N I' J' R)
                 self.dxK     = tf.zeros((self.bs,self.conv_output_shape[1],self.conv_output_shape[2],self.K)) # (N I' J' K)
 		#
@@ -318,9 +322,9 @@ class ConvPoolLayer:
                 self.m       = tf.transpose(self.m_,[3,1,2,0])   # (N I J K)
 		self.p_      = tf.Variable(mysoftmax(tf.random_normal((K,self.I,self.J,self.R,self.bs)),axis=3))# (K,I,J,R,N)
                 self.p       = tf.transpose(self.p_,[4,1,2,0,3]) # (N I J K R)
-		self.p_expand= self.unpool_r(self.p)
+		self.p_expand= self.unpool_R(self.p)
 		self.rho_    = tf.Variable(mysoftmax(tf.random_normal((K,self.I,self.J,self.Ir,self.Jr,self.bs)),axis=[3,4])) # (K I J Ir Jr N)
-                self.rho_tensor = self.revertK(tf.transpose(self.rho_,[5,1,2,3,4,0])) # (N I' J' K)
+                self.rho_tensor = self.assemble_pool_patch(tf.transpose(self.rho_,[5,1,2,3,4,0]),self.K) # (N I' J' K)
                 self.v2_     = tf.Variable(tf.ones((self.K,self.I,self.J,self.bs))) # (K I J N)
                 self.v2      = tf.transpose(self.v2_,[3,1,2,0])
 		self.drop_   = tf.Variable(tf.ones((K,2,self.I,self.J,self.bs))*tf.reshape(tf.one_hot(1,2),(1,2,1,1,1))) # (K 2 I J N)
@@ -347,58 +351,49 @@ class ConvPoolLayer:
 		mask           = tf.reshape(tf.one_hot(self.k_,self.K),(self.K,1,1,1))*tf.reshape(tf.tile(tf.one_hot(self.i_,self.ratio),[(self.I/self.ratio+1)]),(1,(self.I/self.ratio+1)*self.ratio,1,1))*tf.reshape(tf.tile(tf.one_hot(self.j_,self.ratio),[self.J/self.ratio+1]),(1,1,(self.J/self.ratio+1)*self.ratio,1))
 		self.mask      = mask[:,:self.I,:self.J] # (K I J 1)
          ###  first to go from the pooling patches to the conv output for (i) one filter k and (ii) all filters K
-	def tensor2small_patch(self,u,with_n=1,with_reshape=1):
-	    if(with_n):
-		if(with_reshape):
-                    return tf.reshape(tf.extract_image_patches(u,(1,self.Ic,self.Jc,1),(1,1,1,1),(1,1,1,1),"VALID"),(self.bs,self.conv_output_shape[1],self.conv_output_shape[2],self.Ic,self.Jc,self.C))
-		return tf.extract_image_patches(u,(1,self.Ic,self.Jc,1),(1,1,1,1),(1,1,1,1),"VALID")
+	def extract_small_patch(self,u,with_n=1,with_reshape=1):
+	    patches = tf.extract_image_patches(u,(1,self.Ic,self.Jc,1),(1,1,1,1),(1,1,1,1),"VALID")
 	    if(with_reshape):
-                return tf.reshape(tf.extract_image_patches(u,(1,self.Ic,self.Jc,1),(1,1,1,1),(1,1,1,1),"VALID"),(self.conv_output_shape[1],self.conv_output_shape[2],self.Ic,self.Jc,self.C))
-	    return tf.extract_image_patches(u,(1,self.Ic,self.Jc,1),(1,1,1,1),(1,1,1,1),"VALID")
-        def tensor2large_patch(self,u,with_n=1,with_reshape=1):
-            if(with_n):
-		if(with_reshape):
-                    return tf.reshape(tf.extract_image_patches(u,(1,self.Ir+self.Ic-1,self.Jr+self.Jc-1,1),(1,self.Ir,self.Jr,1),(1,1,1,1),"VALID"),(self.bs,self.I,self.J,self.Ir+self.Ic-1,self.Jr+self.Jc-1,self.C))
-		return tf.extract_image_patches(u,(1,self.Ir+self.Ic-1,self.Jr+self.Jc-1,1),(1,self.Ir,self.Jr,1),(1,1,1,1),"VALID")
+		if(with_n): return tf.reshape(patches,(self.bs,self.conv_output_shape[1],self.conv_output_shape[2],self.Ic,self.Jc,self.C))
+		else:       return tf.reshape(patches,(self.conv_output_shape[1],self.conv_output_shape[2],self.Ic,self.Jc,self.C))
+	    return patches
+        def extract_large_patch(self,u,with_n=1,with_reshape=1):
+	    patches = tf.extract_image_patches(u,(1,self.Ir+self.Ic-1,self.Jr+self.Jc-1,1),(1,self.Ir,self.Jr,1),(1,1,1,1),"VALID")
 	    if(with_reshape):
-                return tf.reshape(tf.extract_image_patches(u,(1,self.Ir+self.Ic-1,self.Jr+self.Jc-1,1),(1,self.Ir,self.Jr,1),(1,1,1,1),"VALID"),(self.I,self.J,self.Ir+self.Ic-1,self.Jr+self.Jc-1,self.C))
-	    return tf.extract_image_patches(u,(1,self.Ir+self.Ic-1,self.Jr+self.Jc-1,1),(1,self.Ir,self.Jr,1),(1,1,1,1),"VALID")
-	def small_patch2tensor(self,u):
+		if(with_n): return tf.reshape(patches,(self.bs,self.I,self.J,self.Ir+self.Ic-1,self.Jr+self.Jc-1,self.C))
+		else:       return tf.reshape(patches,(self.I,self.J,self.Ir+self.Ic-1,self.Jr+self.Jc-1,self.C))
+	    return patches
+	def assemble_small_patch(self,u):
 	    return tf.gradients(self.input_small_patch,self.input,u)[0]
-        def large_patch2tensor(self,u):
+        def assemble_large_patch(self,u):
             return tf.gradients(self.input_large_patch,self.input,u)[0]
-	def revert1(self,u):
-            # the following takes as input  (N I J Ir Jr)  returns (N I' J' 1)
-            return tf.gradients(self.dp,self.dx,u)[0]
-	def revertK(self,u):
-            # the following takes as input (N I J Ir Jr K) returns (N I' J' K)
-            return tf.gradients(self.dpK,self.dxK,u)[0]
-#        def revertR(self,r):
-#            # the following takes as input (N I J Ir Jr R) returns (N I' J' R)
-#            return tf.gradients(self.dpR,self.dxR,r)[0]
-	def unpool1(self,u):
-            return tf.gradients(self.dp_pool,self.dx,u)[0]   # takes (N I J 1) returns (N I' J' 1)
-        def unpoolR(self,u):
-            return tf.gradients(self.dpR_pool,self.dxR,u)[0] # takes (N I J R) returns (N I' J' R)
-	def unpoolK(self,u):
-            return tf.gradients(self.dpK_pool,self.dxK,u)[0] # takes (N I J K) returns (N I' J' K)
-	def unpool_r(self,u):# takes (N I J K R) returns (N I' J' K R)
-	    return tf.transpose(tf.map_fn(lambda i:self.unpoolK(i),tf.transpose(u,[4,0,1,2,3]),back_prop=False),[1,2,3,4,0])
-        def valuesk2large_patch(self,u,w): # takes (N I J Ir Jr R) and (R Ic Jc C)
-	    r_u = tf.transpose(tf.reshape(tf.transpose(u,[3,4,5,0,1,2]),[self.Ir,self.Jr,self.R,self.bs*self.I*self.J]),[3,0,1,2]) # (NIJ Ir Jr R)
-	    return tf.gradients(self.r_small_patch,self.input_large_patch,tf.einsum('nijr,rabc->nijabc',r_u,w))[0]
-        def norm_channel_k_bigpatches(self,k): #helper
-            m_rho   = myexpand(self.m_[k]*self.drop_[k,1],[2,3])*self.rho_[k]               # (I J Ir Jr N) 
-            m_rho_p = myexpand(m_rho,[-2])*myexpand(self.p_[k],[2,3])                   # (I J Ir Jr R N)
-            Wflat   = self.valuesk2large_patch(tf.transpose(m_rho_p,[5,0,1,2,3,4]),self.W[k]) # (N I J ?? ?? C)
+	def assemble_pool_patch(self,u,k=1):
+            # the following takes as input  (N I J Ir Jr)  returns (N I' J' 1) or (N I J Ir Jr K) returns (N I' J' K)
+	    if(k==1):      return tf.gradients(self.dp,self.dx,u)[0]
+            if(k==self.R): return tf.gradients(self.dpR,self.dxR,u)[0]
+            else :         return tf.gradients(self.dpK,self.dxK,u)[0]
+	def unpool(self,u,k=1):
+	    # takes (N I J 1) returns (N I' J' 1) or takes (N I J R) returns (N I' J' R) or takes (N I J K) returns (N I' J' K)
+            if(k==1) :       return tf.gradients(self.dp_pool,self.dx,u)[0] 
+            elif(k==self.R) :return tf.gradients(self.dpR_pool,self.dxR,u)[0]
+            elif(k==self.K) :return tf.gradients(self.dpK_pool,self.dxK,u)[0]
+	def unpool_R(self,u):# takes (N I J K R) returns (N I' J' K R)
+	    return tf.transpose(tf.map_fn(lambda i:self.unpool(i,self.K),tf.transpose(u,[4,0,1,2,3]),back_prop=False),[1,2,3,4,0])
+        def pool_patch2large_patch(self,u,w): # takes (N I J Ir Jr R) and (R Ic Jc C) and returns (N I J ?? ?? C)
+	    assembled = self.assemble_pool_patch(u,self.R) #(N I' J' R)
+	    im = self.assemble_small_patch(tf.einsum('nijr,rabc->nijabc',assembled,w)) #(N Iin Jin C)
+	    return self.extract_large_patch(im) #(N I J ?? ?? C)
+        def normwithsigma_bigpatch_k(self,k): #helper
+            Wflat   = self.get_bigpatch_k(k) # (N I J ?? ?? C)
             return tf.reduce_mean(tf.einsum('nijabc,ijabc->n',tf.square(Wflat),1/(2*self.sigmas2_large_patch_)))
-        def channel_k_bigpatches(self,k): #helper_
-            flat_mrho  = myexpand(self.m_[k]*self.drop_[k,1],[2,3])*self.rho_[k]              # (I J Ir Jr N) 
-            flat_mrhop = myexpand(flat_mrho,[-2])*myexpand(self.p_[k],[2,3])                  # (I J Ir Jr R N)
-            return self.valuesk2large_patch(tf.transpose(flat_mrhop,[5,0,1,2,3,4]),self.W[k]) # (N I J ?? ?? C)
+        def get_bigpatch_k(self,k): #helper_
+            flat_mrho  = myexpand(self.m_[k]*self.drop_[k,1],[2,3])*self.rho_[k]  # (I J Ir Jr N) 
+            flat_mrhop = myexpand(flat_mrho,[-2])*myexpand(self.p_[k],[2,3])      # (I J Ir Jr R N)
+	    reshaped_flat_mrhop = tf.transpose(flat_mrhop,[5,0,1,2,3,4])          # (N I J Ir Jr R)
+            return self.pool_patch2large_patch(reshaped_flat_mrhop,self.W[k])     # (N I J ?? ?? C)
 #                                           ----  INITIALIZER    ----
         def update_BV(self):
-            return tf.assign(self.b_,tf.reduce_mean(self.input-self.deconv(),0))
+            return tf.assign(self.b_,tf.reduce_mean(tf.reduce_mean(self.input-self.deconv(),0),[0,1],keepdims=True)*tf.ones((self.Iin,self.Jin,1)))
         def init_thetaq(self):
             new_p       = tf.assign(self.p_,mysoftmax(tf.random_uniform((self.K,self.I,self.J,self.R,self.bs)),axis=3))
 	    new_rho     = tf.assign(self.rho_,mysoftmax(tf.random_uniform((self.K,self.I,self.J,self.Ir,self.Jr,self.bs)),axis=[3,4]))
@@ -416,31 +411,31 @@ class ConvPoolLayer:
 		    W=self.W*(1-mask)
 		else:
 		    W=self.W
-                p_w   = tf.einsum('nijkr,krabc->nijkabc',self.unpool_r(tf.transpose(p,[4,1,2,0,3])),W) # (N I' J' K Ic Jc C)
+                p_w   = tf.einsum('nijkr,krabc->nijkabc',self.unpool_R(tf.transpose(p,[4,1,2,0,3])),W) # (N I' J' K Ic Jc C)
 		if(masked_m==1):
-                    m_rho = self.revertK(tf.transpose(self.rho_*myexpand(m*self.drop_[:,1]*(1-self.mask),[-2,-2]),[5,1,2,3,4,0]))# (N I J Ir JR K)->(N I' J' K)
+                    m_rho = self.assemble_pool_patch(tf.transpose(self.rho_*myexpand(m*self.drop_[:,1]*(1-self.mask),[-2,-2]),[5,1,2,3,4,0]),self.K)# (N I J Ir JR K)->(N I' J' K)
 		elif(masked_m==-1):
-                    m_rho = self.revert1(tf.transpose(self.rho_[self.k_]*myexpand(self.drop_[self.k_,1]*self.mask[self.k_],[2,3]),[4,0,1,2,3]))# (N I' J' 1)
-		    return self.small_patch2tensor(myexpand(m_rho,[-1,-1])*p_w[:,:,:,self.k_])
+                    m_rho = self.assemble_pool_patch(tf.transpose(self.rho_[self.k_]*myexpand(self.drop_[self.k_,1]*self.mask[self.k_],[2,3]),[4,0,1,2,3]),1)# (N I' J' 1)
+		    return self.assemble_small_patch(myexpand(m_rho,[-1,-1])*p_w[:,:,:,self.k_])
                 else:
-                    m_rho = self.revertK(tf.transpose(self.rho_*myexpand(m*self.drop_[:,1],[-2,-2]),[5,1,2,3,4,0]))# (N I' J' K)
-                return self.small_patch2tensor(tf.einsum('nijk,nijkabc->nijabc',m_rho,p_w))
+                    m_rho = self.assemble_pool_patch(tf.transpose(self.rho_*myexpand(m*self.drop_[:,1],[-2,-2]),[5,1,2,3,4,0]),self.K)# (N I' J' K)
+                return self.assemble_small_patch(tf.einsum('nijk,nijkabc->nijabc',m_rho,p_w))
 	def sample(self,M,K=None,sigma=1):
 		#multinomial returns [K,n_samples] with integer value 0,...,R-1
+		if(isinstance(self.input_layer,InputLayer)):sigma=0
 		noise = sigma*tf.random_normal(self.input_shape)*tf.sqrt(self.sigmas2)
-                if(K==None):
-                    sigma_hot        = tf.one_hot(tf.reshape(tf.multinomial(tf.log(self.pi),self.bs*self.I*self.J),(self.K,self.I,self.J,self.bs)),self.R) # (K I J N R)
-		    sigma_hot_reshape= self.unpool_r(tf.transpose(sigma_hot,[3,1,2,0,4])) # (R N I' J' K) -> (N I' J' K R)
-		    sigma_hot_w      = tf.einsum('nijkr,krabc->nijkabc',sigma_hot_reshape,self.W) # (N I' J' K Ic Jc C)
-                    pool_hot         = tf.one_hot(tf.reshape(tf.multinomial(tf.log(tf.ones((self.K*self.I*self.J,self.R))),self.bs),(self.K,self.I,self.J,self.bs) ),self.Ir*self.Jr) # (K I J N IrxJr)
-		    pool_hot_reshape = tf.transpose(tf.reshape(pool_hot,[self.K,self.I,self.J,self.bs,self.Ir,self.Jr]),[3,1,2,4,5,0]) # (N I J Ir Jr K)
-		    reverted         = self.revertK(myexpand(M,[-2,-2])*pool_hot_reshape) # (N I' J' K)
-                return self.small_patch2tensor(tf.einsum('nijkabc,nijk->nijabc',sigma_hot_w,reverted))+noise+self.b
+                sigma_hot        = tf.one_hot(tf.reshape(tf.multinomial(tf.log(self.pi),self.bs*self.I*self.J),(self.K,self.I,self.J,self.bs)),self.R) # (K I J N R)
+		sigma_hot_reshape= self.unpool_R(tf.transpose(sigma_hot,[3,1,2,0,4])) # (R N I' J' K) -> (N I' J' K R)
+		sigma_hot_w      = tf.einsum('nijkr,krabc->nijkabc',sigma_hot_reshape,self.W) # (N I' J' K Ic Jc C)
+                pool_hot         = tf.one_hot(tf.reshape(tf.multinomial(tf.zeros((1,self.Ir*self.Jr)),self.K*self.bs*self.I*self.J),(self.K,self.I,self.J,self.bs)),self.Ir*self.Jr) # (K I J N IrxJr)
+		pool_hot_reshape = tf.transpose(tf.reshape(pool_hot,[self.K,self.I,self.J,self.bs,self.Ir,self.Jr]),[3,1,2,4,5,0]) # (N I J Ir Jr K)
+		reverted         = self.assemble_pool_patch(myexpand(M,[-2,-2])*pool_hot_reshape,self.K) # (N I' J' K)
+                return self.assemble_small_patch(tf.einsum('nijkabc,nijk->nijabc',sigma_hot_w,reverted))+noise+self.b
         def likelihood(self):
 		# RECONSTRUCTION
                 a1 = -tf.einsum('nijc,ijc->',tf.square(self.input-self.deconv()-self.b),1/(2*self.sigmas2_*self.bs))
                 a2 = -tf.einsum('cijn,ijc->',self.input_layer.v2_,1/(2*self.sigmas2_*self.bs))
-                a3  = tf.reduce_sum(tf.map_fn(self.norm_channel_k_bigpatches,tf.range(self.K),dtype=tf.float32,back_prop=False))
+                a3  = tf.reduce_sum(tf.map_fn(self.normwithsigma_bigpatch_k,tf.range(self.K),dtype=tf.float32,back_prop=False))
 		a40 = tf.einsum('krijc,abijc->krab',tf.square(self.W),1/(2*self.sigmas2_small_patch_*self.bs)) #(K R I' J')
 		a41 = tf.einsum('nijkr,krij->nijk',self.p_expand,a40)*self.rho_tensor # (N I' J' K)
                 a4  = -tf.einsum('nijk,kijn->',mysumpool(a41,[self.Ir,self.Jr]),(tf.square(self.m_)+self.v2_)*self.drop_[:,1])
@@ -453,7 +448,7 @@ class ConvPoolLayer:
 		return []
         def update_v2(self):# DONE
                 a40 = tf.einsum('krabc,ijabc->krij',tf.square(self.W),1/self.sigmas2_small_patch_)#(K R I' J')
-                a41 = tf.einsum('nijkr,krij->nijk',self.unpool_r(self.p),a40)*self.rho_tensor # (N I' J' K)
+                a41 = tf.einsum('nijkr,krij->nijk',self.unpool_R(self.p),a40)*self.rho_tensor # (N I' J' K)
                 a4  = mysumpool(a41,[self.Ir,self.Jr])*self.drop[1] #( N I J K)
                 if(isinstance(self.next_layer,ConvPoolLayer)):
 	                v_value      = 1/self.next_layer.sigmas2+a4 # (N I J K)
@@ -466,7 +461,7 @@ class ConvPoolLayer:
 		deconv_with    = self.deconv(None,-1,0)
 		reconstruction = (self.input-self.b-self.deconv(None,1,0))/self.sigmas2
 		###
-		patches          = self.tensor2large_patch(reconstruction*deconv_with,with_reshape=0) #(N I J ??)
+		patches          = self.extract_large_patch(reconstruction*deconv_with,with_reshape=0) #(N I J ??)
 		selected_patches = patches[:,self.i_::self.ratio,self.j_::self.ratio] #  (N I'' J'' ??)
                 forward          = tf.reduce_sum(selected_patches,3)  # (N I'' J'')
                 if(isinstance(self.next_layer,ConvPoolLayer)):
@@ -478,10 +473,10 @@ class ConvPoolLayer:
 		update_value_m = (forward+backward)*self.v2[:,self.i_::self.ratio,self.j_::self.ratio,self.k_]#/v_value # (N I'' J'')
                 new_m = tf.scatter_nd_update(self.m_,self.indices_,tf.transpose(tf.reshape(update_value_m,(self.bs,-1))))
 		### UPDATE P
-                reconstruction = (self.input-self.b-self.deconv(None,1,0,m=new_m))/self.sigmas2
-		m_rho = self.unpool1(tf.expand_dims(tf.transpose(new_m[self.k_]*self.drop_[self.k_,1]*self.mask[self.k_],[2,0,1]),-1))*tf.expand_dims(self.rho_tensor[:,:,:,self.k_],-1)# (N I' J' 1)
+#                reconstruction = (self.input-self.b-self.deconv(None,1,0,m=new_m))/self.sigmas2
+		m_rho = self.unpool(tf.expand_dims(tf.transpose(new_m[self.k_]*self.drop_[self.k_,1]*self.mask[self.k_],[2,0,1]),-1),1)*tf.expand_dims(self.rho_tensor[:,:,:,self.k_],-1)# (N I' J' 1)
 		deconv_with_patch = tf.einsum('nij,rabc->rnijabc',m_rho[:,:,:,0],self.W[self.k_]) # (R N I' J' Ic Jc C)
-		deconv_with2 = tf.map_fn(lambda x:tf.reduce_sum(self.tensor2large_patch(self.small_patch2tensor(x)*reconstruction,with_reshape=0)[:,self.i_::self.ratio,self.j_::self.ratio],axis=3),deconv_with_patch,back_prop=False) # (R N I'' J'')
+		deconv_with2 = tf.map_fn(lambda x:tf.reduce_sum(self.extract_large_patch(self.assemble_small_patch(x)*reconstruction,with_reshape=0)[:,self.i_::self.ratio,self.j_::self.ratio],axis=3),deconv_with_patch,back_prop=False) # (R N I'' J'')
 #		proj = tf.transpose(deconv_with2,[1,2,3,0]) # N I'' J'' R
                 a40  = tf.einsum('rabc,ijabc->rij',tf.square(self.W[self.k_]),0.5/self.sigmas2_small_patch_) #( R I' J')
                 a41  = tf.expand_dims(a40,1)*tf.expand_dims(self.rho_tensor[:,:,:,self.k_],0) # (R N I' J')
@@ -490,13 +485,13 @@ class ConvPoolLayer:
                 update_value = mysoftmax(deconv_with2-a4+myexpand(tf.log(self.pi[self.k_]),[-1,-1,-1]),axis=0,coeff=eps)# (R N I'' J'')
                 new_p        = tf.scatter_nd_update(self.p_,self.indices_,tf.transpose(tf.reshape(update_value,(self.R,self.bs,-1)),[2,0,1]))
 		###
-                reconstruction = (self.input-self.b-self.deconv(None,1,0,m=new_m,p=new_p))/self.sigmas2
-                patches2    = self.tensor2small_patch(reconstruction)
-                mp_reverted = self.unpoolR(tf.transpose(tf.expand_dims(self.drop_[self.k_,1]*new_m[self.k_],-2)*new_p[self.k_],[3,0,1,2])) # (I J R N)
+#                reconstruction = (self.input-self.b-self.deconv(None,1,0,m=new_m,p=new_p))/self.sigmas2
+                patches2    = self.extract_small_patch(reconstruction)
+                mp_reverted = self.unpool(tf.transpose(tf.expand_dims(self.drop_[self.k_,1]*new_m[self.k_],-2)*new_p[self.k_],[3,0,1,2]),self.R) # (N I' J' R)
 		backward2   = tf.tensordot(mp_reverted,self.W[self.k_],[[3],[0]]) # (N I' J' Ic Jc C)
 		proj2       = tf.reduce_sum(patches2*backward2,[3,4,5]) # (N I' J')
 		a43 = tf.expand_dims(self.drop_[self.k_,1]*(tf.square(new_m[self.k_])+self.v2_[self.k_]),-2)*new_p[self.k_] # (I J R N)
-                a44 = tf.einsum('nijr,rij->nij',self.unpoolR(tf.transpose(a43,[3,0,1,2])),a40) # (N I' J')
+                a44 = tf.einsum('nijr,rij->nij',self.unpool(tf.transpose(a43,[3,0,1,2]),self.R),a40) # (N I' J')
                 V   = tf.reshape(tf.extract_image_patches(tf.expand_dims(proj2-a44,-1),(1,self.Ir,self.Jr,1),(1,self.Ir,self.Jr,1),(1,1,1,1),"VALID"),
                                                                 (self.bs,self.I,self.J,self.Ir,self.Jr)) # (N I J Ir Jr)
                 update_value_rho = mysoftmax(V[:,self.i_::self.ratio,self.j_::self.ratio],axis=[3,4],coeff=eps)# (N I'' J'' Ir Jr)
@@ -509,12 +504,12 @@ class ConvPoolLayer:
                 k = self.k_
 		r = self.r_
 		## FIRST COMPUTE DENOMINATOR
-		m2v2_augmented   = self.unpool1(tf.expand_dims(tf.transpose((tf.square(self.m_[self.k_])+self.v2_[self.k_])*self.p_[self.k_,:,:,self.r_]*self.drop_[self.k_,1],[2,0,1]),-1))[:,:,:,0]*self.rho_tensor[:,:,:,self.k_] # ( N I' J')
+		m2v2_augmented   = self.unpool(tf.expand_dims(tf.transpose((tf.square(self.m_[self.k_])+self.v2_[self.k_])*self.p_[self.k_,:,:,self.r_]*self.drop_[self.k_,1],[2,0,1]),-1),1)[:,:,:,0]*self.rho_tensor[:,:,:,self.k_] # ( N I' J')
 		denominator      = tf.reduce_sum(tf.expand_dims(m2v2_augmented,-1)/self.sigmas2[:,self.i_:self.input_shape[1]-self.Ic+1+self.i_,self.j_:self.input_shape[2]-self.Jc+1+self.j_],[0,1,2])# (N I' J' C) SUM-> (C)
 		## NOW COMPUTE NUMERATOR
                 reconstruction  = (self.input-self.b-self.deconv(None,0,1))/self.sigmas2 # (N Iin Jin C)
                 cropped_reconstruction = reconstruction[:,self.i_:self.input_shape[1]-self.Ic+1+self.i_,self.j_:self.input_shape[2]-self.Jc+1+self.j_] # (N I'' J'' C)
-                m_reverted      = self.unpool1(tf.expand_dims(tf.transpose(self.m_[self.k_]*self.p_[self.k_,:,:,self.r_],[2,0,1]),-1))[:,:,:,0]*self.rho_tensor[:,:,:,self.k_] # ( N I' J')
+                m_reverted      = self.unpool(tf.expand_dims(tf.transpose(self.m_[self.k_]*self.p_[self.k_,:,:,self.r_],[2,0,1]),-1),1)[:,:,:,0]*self.rho_tensor[:,:,:,self.k_] # ( N I' J')
                 mask            = tf.expand_dims(m_reverted,-1) # (N I' J' 1) 
                 proj            = tf.reduce_sum(cropped_reconstruction*mask,[0,1,2]) # (C)
                 if(self.nonlinearity is None or self.nonlinearity is 'relu'):
@@ -523,7 +518,7 @@ class ConvPoolLayer:
                     m_rho      = myexpand(self.m_[self.k_],[2,3])*self.rho_[k]   # (I J Ir Jr N) 
                     m_rho_p    = myexpand(m_rho,[-2])*myexpand(self.p_[k],[2,3]) # (I J Ir Jr R N)
 		    t_m_rho_p  = tf.transpose(m_rho_p,[5,0,1,2,3,4])             # (N I J Ir Jr R)
-                    large_patch= self.valuesk2large_patch(t_m_rho_p,masked_W)/self.sigmas2_large_patch # (N I J ?? ?? C)
+                    large_patch= self.pool_patch2large_patch(t_m_rho_p,masked_W)/self.sigmas2_large_patch # (N I J ?? ?? C)
 		    selected_W = large_patch[:,:,:,self.i_:self.i_+self.Ir,self.j_:self.j_+self.Jr]    # (N,I,J,Ir,Jr,C)
 		    proj2      = tf.reduce_sum(selected_W*tf.expand_dims(t_m_rho_p[:,:,:,:,:,self.r_],-1),[0,1,2,3,4]) # ( C)
                     new_w      = tf.scatter_nd_update(self.W_,[[self.k_,self.r_,self.i_,self.j_]],[(proj+proj2)/(denominator+self.sparsity_prior)])
@@ -543,11 +538,11 @@ class ConvPoolLayer:
                 a1 = tf.reduce_mean(tf.square(self.input-self.b-self.deconv()),0)
                 a2 = tf.reduce_mean(self.input_layer.v2,0)
                 # HERE THE ADDITIONAL NORM
-		patches = tf.reduce_sum(tf.square(tf.map_fn(self.channel_k_bigpatches,tf.range(self.K),dtype=tf.float32,back_prop=False)),0) # (N,I,J Ic+Ir-1 Jc+Jr-1 C)
-		a3  = tf.reduce_mean(self.large_patch2tensor(patches),0)
+		patches = tf.reduce_sum(tf.square(tf.map_fn(self.get_bigpatch_k,tf.range(self.K),dtype=tf.float32,back_prop=False)),0) # (N,I,J Ic+Ir-1 Jc+Jr-1 C)
+		a3  = tf.reduce_mean(self.assemble_large_patch(patches),0)
                 a40 = tf.square(self.W) # K R Ic Jc C
-                a41 = self.unpool_r(self.p*tf.expand_dims(tf.square(self.m)+self.v2,-1))*tf.expand_dims(self.rho_tensor,-1) # (N I' J' K R)
-                a4  = tf.reduce_mean(self.small_patch2tensor(tf.einsum('nijkr,krabc->nijabc',a41,a40)),0)
+                a41 = self.unpool_R(self.p*tf.expand_dims(tf.square(self.m)+self.v2,-1))*tf.expand_dims(self.rho_tensor,-1) # (N I' J' K R)
+                a4  = tf.reduce_mean(self.assemble_small_patch(tf.einsum('nijkr,krabc->nijabc',a41,a40)),0)
                 value = a1+a2-a3+a4
                 if(self.sigma_opt=='local'):
                     return tf.assign(self.sigmas2_,value)

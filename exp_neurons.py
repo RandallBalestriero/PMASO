@@ -8,6 +8,8 @@ from layers import *
 from utils import *
 
 import cPickle
+import os
+SAVE_DIR = os.environ['SAVE_DIR']
 
 DATASET = 'MNIST'
 
@@ -57,7 +59,7 @@ for i in [2,3,5]+[20]*10:
 	samplesclass1.append([model1.sampleclass(1,k)[:150] for k in xrange(neuronsss)])
 	W.append(model1.get_Ws())
 
-f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_neurons_'+sigmass+'_'+str(nonlinearity)+'.pkl','wb')
+f=open(SAVE_DIR+'exp_neurons_'+sigmass+'_'+str(nonlinearity)+'.pkl','wb')
 cPickle.dump([LOSSE,reconstruction,XX[:150],samplesclass0,samplesclass1,W],f)
 f.close()
 
