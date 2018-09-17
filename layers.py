@@ -227,7 +227,7 @@ class DenseLayer:
 		    return []
 		elif(self.sigma_opt=='channel'):
 		    v=tf.reduce_mean(tf.reshape(value,self.input_shape[1:]),axis=[0,1],keepdims=True)
-		    return tf.assign(self.sigmas2_,tf.reshape(tf.tile(v,[self.input_shape[1],self.input_shape[2],1]),[self.D_in]))
+		    return tf.assign(self.sigmas2_,tf.reshape(tf.ones([self.input_shape[1],self.input_shape[2],1])*v,[self.D_in]))
         def update_pi(self):
 		if(self.learn_pi==0):
 		    return []
@@ -298,6 +298,8 @@ class ConvPoolLayer:
                 self.sigmas2_small_patch_= self.extract_small_patch(self.sigmas2,with_n=0)
 		self.sigmas2_small_patch = tf.expand_dims(self.sigmas2_small_patch_,0)
 		###############################   WE DEFINE SOME HELPER VARIABLES FOR LATER FUNCTIONS ###############################################
+		self.multiplied_x = tf.reshape(tf.extract_image_patches(tf.transpose(tf.reshape(tf.transpose(self.input_large_patch,[3,4,5,0,1,2]),[self.Ic+self.Ir-1,self.Jc+self.Jr-1,self.C,self.bs*self.I*self.J]),[3,0,1,2]),(1,self.Ic,self.Jc,1),(1,1,1,1),(1,1,1,1),"VALID"),[self.bs,self.I,self.J,self.Ir,self.Jr,self.Ic,self.Jc,self.C])
+		#####
                 self.dx       = tf.zeros((self.bs,self.conv_output_shape[1],self.conv_output_shape[2],1)) # (N I' J' 1)
 #		self.input_sc = tf.zeros((self.bs,self.input_shape[1],self.input_shape[2],1))
 #		self.input_sc_small_patch = tf.reshape(tf.extract_image_patches(self.input_sc,(1,Ic,Jc,1),(1,1,1,1),(1,1,1,1),"VALID"),
@@ -380,9 +382,9 @@ class ConvPoolLayer:
 	def unpool_R(self,u):# takes (N I J K R) returns (N I' J' K R)
 	    return tf.transpose(tf.map_fn(lambda i:self.unpool(i,self.K),tf.transpose(u,[4,0,1,2,3]),back_prop=False),[1,2,3,4,0])
         def pool_patch2large_patch(self,u,w): # takes (N I J Ir Jr R) and (R Ic Jc C) and returns (N I J ?? ?? C)
-	    assembled = self.assemble_pool_patch(u,self.R) #(N I' J' R)
-	    im = self.assemble_small_patch(tf.einsum('nijr,rabc->nijabc',assembled,w)) #(N Iin Jin C)
-	    return self.extract_large_patch(im) #(N I J ?? ?? C)
+	    assembled_w = tf.einsum('nijpqr,rabc->nijpqabc',u,w) # (N I' J' Ic Jc C)
+#	    im          = self.assemble_small_patch(assembled_w) #(N Iin Jin C)
+	    return tf.gradients(self.multiplied_x,self.input_large_patch,assembled_w)[0]#self.extract_large_patch(im) #(N I J ?? ?? C)
         def normwithsigma_bigpatch_k(self,k): #helper
             Wflat   = self.get_bigpatch_k(k) # (N I J ?? ?? C)
             return tf.reduce_mean(tf.einsum('nijabc,ijabc->n',tf.square(Wflat),1/(2*self.sigmas2_large_patch_)))
@@ -393,7 +395,7 @@ class ConvPoolLayer:
             return self.pool_patch2large_patch(reshaped_flat_mrhop,self.W[k])     # (N I J ?? ?? C)
 #                                           ----  INITIALIZER    ----
         def update_BV(self):
-            return tf.assign(self.b_,tf.reduce_mean(tf.reduce_mean(self.input-self.deconv(),0),[0,1],keepdims=True)*tf.ones((self.Iin,self.Jin,1)))
+            return tf.assign(self.b_,tf.reduce_sum(tf.reduce_mean(self.input-self.deconv(),0)/self.sigmas2_,[0,1],keepdims=True)*tf.ones((self.Iin,self.Jin,1))/tf.reduce_sum(1/self.sigmas2_,[0,1],keepdims=True))
         def init_thetaq(self):
             new_p       = tf.assign(self.p_,mysoftmax(tf.random_uniform((self.K,self.I,self.J,self.R,self.bs)),axis=3))
 	    new_rho     = tf.assign(self.rho_,mysoftmax(tf.random_uniform((self.K,self.I,self.J,self.Ir,self.Jr,self.bs)),axis=[3,4]))
@@ -547,7 +549,7 @@ class ConvPoolLayer:
                 if(self.sigma_opt=='local'):
                     return tf.assign(self.sigmas2_,value)
                 elif(self.sigma_opt=='channel'):
-                    return tf.assign(self.sigmas2_,tf.tile(tf.reduce_mean(value,2,keepdims=True),[1,1,self.C]))
+                    return tf.assign(self.sigmas2_,tf.reduce_mean(value,[0,1],keepdims=True)*tf.ones([self.Iin,self.Jin,1]))
 		elif(self.sigma_opt=='global'):
                     return tf.assign(self.sigmas2_,tf.fill([self.Iin,self.Jin,self.C],tf.reduce_mean(value)))
 		else:

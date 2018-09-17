@@ -31,7 +31,7 @@ if(modeln==0):
 	layers1.append(FinalLayer(layers1[-1],10))
 elif(modeln==1):
         layers1 = [InputLayer(input_shape)]
-        layers1.append(ConvPoolLayer(layers1[-1],Ic=5,Jc=5,Ir=4,Jr=4,K=4,R=2,nonlinearity=None,sparsity_prior=0.0,sigma='channel'))
+        layers1.append(ConvPoolLayer(layers1[-1],Ic=5,Jc=5,Ir=2,Jr=2,K=4,R=2,nonlinearity=None,sparsity_prior=0.0,sigma='channel'))
 #        layers1.append(ConvPoolLayer(layers1[-1],Ic=3,Jc=3,Ir=2,Jr=2,K=12,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='channel'))
 #        layers1.append(DenseLayer(layers1[-1],K=64,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='global'))
         layers1.append(DenseLayer(layers1[-1],K=64,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='global'))
@@ -52,7 +52,7 @@ else:
         model1.init_dataset(XX)
 
 #init_model(model1,CPT=10)
-LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(0.00000001,'linear'),CPT=4,random=0,fineloss=0,verbose=1)
+LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(0.00000001,'linear'),CPT=50,random=0,fineloss=0,verbose=1)
 reconstruction = model1.reconstruct()[:150]
 samplesclass1  = [model1.sampleclass(int(k<4),k)[:300] for k in xrange(10)]
 samples1       = model1.sample(1)
