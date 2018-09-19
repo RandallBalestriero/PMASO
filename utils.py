@@ -107,11 +107,12 @@ class model:
         ### INITIALIZATION OP
         self.initx              = tf.assign(self.layers[0].m,self.x)
         self.inity              = tf.assign(self.layers[-1].p_,tf.expand_dims(tf.one_hot(self.y,self.layers[-1].R),0))
-        self.initop_thetaq_random  = [l.init_thetaq() for l in layers[1:]]
+        self.initop_thetaq      = [l.init_thetaq() for l in layers]
         ### WEIGHTS UPDATES OP
 	self.updates_BV      = [l.update_BV() for l in layers[1:]]
         self.updates_m       = [l.update_m() for l in layers[1:-1]]
 	self.updates_v2      = [l.update_v2() for l in layers[1:-1]]
+	self.updates_firstlayer = tf.group(layers[0].update_v2(),layers[0].update_m())
 	self.update_last_p   = layers[-1].update_p() # SEPARATE DEPENDING ON SUP UNSUP TRAINING
         self.updates_sigma   = [l.update_sigma() for l in layers[1:]]
         self.updates_Wk      = [l.update_Wk() for l in layers[1:]]
@@ -125,8 +126,6 @@ class model:
         self.samplet         = sampletrue(layers)
     def get_sigmas(self):
 	return self.session.run([l.sigmas2_ for l in self.layers[1:]])
-#   def get_bs(self):
-#       return self.session.run([l.b_ for l in self.layers[1:]])
     def get_Ws(self):
 	Ws = []
 	for l in self.layers[1:]:
@@ -139,6 +138,7 @@ class model:
         loss = []
 	l    = lay
         GAIN = self.session.run(self.KL)
+	if(lay==0): self.session.run(self.updates_firstlayer)
 	if(l<len(self.updates_v2)):
             t = time.time()
             self.session.run(self.updates_v2[lay])
@@ -168,11 +168,10 @@ class model:
                     loss.append(L)
             if(verbose): print 'M',l,self.session.run(self.KL)
 	else:
-	    if(self.hold_last_p==0):
-	        self.session.run(self.update_last_p)
-	        L = self.session.run(self.KL)
-	        loss.append(L)
-                if(verbose): print 'P',l,self.session.run(self.KL)
+            self.session.run(self.update_last_p)
+            L = self.session.run(self.KL)
+            loss.append(L)
+            if(verbose): print 'P',l,self.session.run(self.KL)
         L = self.session.run(self.KL)
         return L-GAIN
     def layer_M_step(self,lay,random=1,fineloss=1,verbose=0):
@@ -245,12 +244,12 @@ class model:
         GAINS = 0
 	print 'Beginning of M-step...',self.session.run(self.like),self.session.run(self.KL)
         for l in range(self.L-1):
-            layer_cpt,g_ = 0,rcoeff
-            while(g_>rcoeff/(self.L-1.0) and layer_cpt<40):
+            layer_cpt,g_ = 0,rcoeff+1
+            while(g_>rcoeff and layer_cpt<40):
                 g_=self.layer_M_step(l,random=random,fineloss=fineloss,verbose=verbose)
                 GAINS+=g_
 	return GAINS
-    def E_step2(self,rcoeff,fineloss=0,random=0):
+    def E_step2(self,rcoeff,fineloss=0,random=0,verbose=0):
         GAINS      = 0
         g = rcoeff+1
         layer_cpt = 0
@@ -258,9 +257,10 @@ class model:
 	    layer_cpt+=1
 	    g=0
             for l in range(self.L-1):
-                g_=self.layer_E_step(l,random=random,fineloss=fineloss)
+                g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose)
                 g+=g_
-	return g#GAINS
+	    GAINS+=g
+	return GAINS
     def init_dataset(self,x,y=None):
         """this function initializes the variable of the
         first layer with x and possibly the last layer
@@ -270,9 +270,9 @@ class model:
         self.session.run(self.initx,feed_dict={self.x:x})
         if(y is not None):
             self.session.run(self.inity,feed_dict={self.y:y})
-            self.hold_last_p = 1
+            self.set_output_mask(zeros(x.shape[0]).astype('float32'))
         else:
-            self.hold_last_p = 0
+	    self.set_output_mask(ones(x.shape[0]).astype('float32'))
     def init_thetaq(self):
         """this function is used alone when for example testing
         the model on a new dataset (using init_dataset),
@@ -280,16 +280,23 @@ class model:
         trained ones but one aims at correct initialization 
         of the Q fistribution parameters. 
         For initialization of the whole model see the below fun"""
-	for l in xrange(self.L-1-self.hold_last_p):
-            self.session.run(self.initop_thetaq_random[l])
+	for l in xrange(self.L):
+            self.session.run(self.initop_thetaq[l])
     def sample(self,sigma):
         return self.session.run(self.samples,feed_dict={self.sigma:float32(sigma)})
     def sampleclass(self,sigma,k):
         return self.session.run(self.samplesclass[k],feed_dict={self.sigma:float32(sigma)})
+    def get_input(self):
+        return self.session.run(self.layers[0].m)
     def reconstruct(self):
         return self.session.run(self.samplet)
     def predict(self):
         return squeeze(self.session.run(self.layers[-1].p_))
+    def set_input_mask(self,mask):
+	self.session.run(tf.assign(self.layers[0].mask,mask))
+    def set_output_mask(self,mask):
+        self.session.run(tf.assign(self.layers[-1].mask,mask))
+
 
 
 def train_layer_model(model,rcoeff_schedule,CPT,random=0,fineloss=1,return_time=0,verbose=0):

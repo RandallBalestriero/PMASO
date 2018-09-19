@@ -50,6 +50,7 @@ if(supss):
 else:
     model1.init_dataset(XX)
 
+model1.set_output_mask(concatenate([zeros(6000),ones(1000)]).astype('float32'))
 
 samplesclass0 = []
 samplesclass1 = []
@@ -62,7 +63,7 @@ for i in [15]*12:
         reconstruction2.append(model1.get_input()[-1000:])
 
 
-f=open(SAVE_DIR+'exp_oclusion1_'+str(p)+'_'+sigmass+'_'+str(nonlinearity)+'.pkl','wb')
+f=open(SAVE_DIR+'exp_oclusion2_'+str(p)+'_'+sigmass+'_'+str(nonlinearity)+'.pkl','wb')
 cPickle.dump([LOSSE,reconstruction2,XX[-1000:]],f)
 f.close()
 

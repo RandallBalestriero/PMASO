@@ -18,7 +18,7 @@ x_train,y_train,x_test,y_test = load_data(DATASET)
 
 
 pp = permutation(x_train.shape[0])[:1000]
-XX = x_train[pp]+randn(len(pp),1,28,28)*0.05
+XX = x_train[pp]+randn(len(pp),1,28,28)*0.02
 YY = y_train[pp]
 
 XX = transpose(XX,[0,2,3,1])
@@ -34,7 +34,7 @@ elif(modeln==1):
         layers1.append(ConvPoolLayer(layers1[-1],Ic=5,Jc=5,Ir=2,Jr=2,K=4,R=2,nonlinearity=None,sparsity_prior=0.0,sigma='channel'))
 #        layers1.append(ConvPoolLayer(layers1[-1],Ic=3,Jc=3,Ir=2,Jr=2,K=12,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='channel'))
 #        layers1.append(DenseLayer(layers1[-1],K=64,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='global'))
-        layers1.append(DenseLayer(layers1[-1],K=64,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='global'))
+        layers1.append(DenseLayer(layers1[-1],K=64,R=2,nonlinearity=None,sparsity_prior=0.00,sigma='local'))
         layers1.append(FinalLayer(layers1[-1],10,sparsity_prior=0.00,sigma='local'))
 else:
 	layers1 = [InputLayer(input_shape)]
@@ -54,13 +54,13 @@ else:
 #init_model(model1,CPT=10)
 LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(0.00000001,'linear'),CPT=50,random=0,fineloss=0,verbose=1)
 reconstruction = model1.reconstruct()[:150]
-samplesclass1  = [model1.sampleclass(int(k<4),k)[:300] for k in xrange(10)]
-samples1       = model1.sample(1)
+samplesclass1  = [model1.sampleclass(1,k)[:300] for k in xrange(10)]
+samplesclass0  = [model1.sampleclass(0,k)[:300] for k in xrange(10)]
 
 W = model1.session.run(model1.layers[1].W)
 
 f=open('BASE_EXP/exp_cnn_sup'+str(supervised)+'_'+str(modeln)+'.pkl','wb')
-cPickle.dump([LOSSES,reconstruction,XX[:150],samplesclass1,samples1,W],f)
+cPickle.dump([LOSSES,reconstruction,XX[:150],samplesclass1,samplesclass0,W],f)
 f.close()
 
 
