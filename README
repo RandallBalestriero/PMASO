@@ -1,3 +1,11 @@
+dodo 1 0.1
+jack 1 0.05
+
+unsup 2 0.2
+last 2 0.1
+occ 2 0.05
+
+
 # FOR EXPERIMENTING THE RUNS CNN
 ./exp_cnn_runs.sh 3 0
 ./exp_cnn_runs.sh 3 1
