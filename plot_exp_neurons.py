@@ -98,42 +98,22 @@ def doit(sig,l,doplot=1):
 
 
 
-loss1 = unique(doit('local',1,0))
-loss2 = unique(doit('local',2,0))
-loss3 = unique(doit('local',3,1))
-loss4 = unique(doit('global',1,0))
-loss5 = unique(doit('global',2,0))
-loss6 = unique(doit('global',3,0))
+#loss1 = unique(doit('local',1,0))
+#loss2 = unique(doit('local',2,0))
+#loss3 = unique(doit('local',3,0))
+#loss4 = unique(doit('global',1,0))
+#loss5 = unique(doit('global',2,0))
+loss6 = unique(doit('global',3,1))
 
 
-print loss1[-1]
-print loss2[-1]
-print loss3[-1]
-print loss4[-1]
-print loss5[-1]
-print loss6[-1]
-
-
-figure(figsize=(15,15))
-plot(loss1,c='b',ls='--',linewidth=5)
-plot(range(len(loss1))[3::20],loss1[3::20],c='b',ls='None',marker='o',markersize=10)
-plot(loss4,c='b',ls='-',linewidth=5)
-plot(range(len(loss4))[3::20],loss4[3::20],c='b',ls='None',marker='o',markersize=10)
-
-plot(loss2,c='b',ls='--',linewidth=5)
-plot(range(len(loss2))[3::20],loss2[3::20],c='r',ls='None',marker='x',markersize=10)
-plot(loss5,c='b',ls='-',linewidth=5)
-plot(range(len(loss5))[3::20],loss5[3::20],c='r',ls='None',marker='x',markersize=10)
-
-plot(loss3,c='k',ls='--',linewidth=5)
-plot(range(len(loss3))[3::20],loss3[3::20],c='k',ls='None',marker='s',markersize=10)
-plot(loss6,c='k',ls='-',linewidth=5)
-plot(range(len(loss6))[3::20],loss6[3::20],c='k',ls='None',marker='s',markersize=10)
-
-
+figure(figsize=(4,4))
+plot(loss6,c='k',ls='-',linewidth=4)
+plot(range(len(loss6))[3::20],loss6[3::30],c='k',ls='None',marker='x',markersize=8)
 tight_layout()
 savefig('BASE_EXP/neurons/losses.png')
 close()
+
+
 
 
 

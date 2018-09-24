@@ -5,6 +5,8 @@ import matplotlib as mpl
 label_size = 13
 mpl.rcParams['xtick.labelsize'] = label_size+10
 mpl.rcParams['ytick.labelsize'] = label_size
+import os
+SAVE_DIR = os.environ['SAVE_DIR']
 
 fs=15
 
@@ -23,16 +25,12 @@ def plotclasses(classes):
 
 
 
-f=open('BASE_EXP/exp_cnn_sup1_1.pkl','rb')
+f=open(SAVE_DIR+'exp_cnn_cifar_local_1_0.pkl','rb')
 LOSSES,reconstruction,x,samplesclass1,samplesclass0,W=cPickle.load(f)
+reconstruction = reconstruction[-1]
+
 print reconstruction.max()
 f.close()
-print LOSSES
-plot(unique(LOSSES))
-tight_layout()
-savefig('BASE_EXP/CNN/losses.png')
-close()
-
 
 
 for i in xrange(100):
@@ -51,6 +49,8 @@ for i in xrange(100):
     savefig('BASE_EXP/CNN/reconstruction_'+str(i)+'.png')
     close()
 
+
+wdaw
 
 for i in xrange(100):
     for j in xrange(10):

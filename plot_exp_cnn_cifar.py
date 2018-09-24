@@ -30,40 +30,53 @@ def plotclasses(classes,samplesclass1):
 
 
 
-def doit(sig,l,k,doplot=1):
-    f=open(SAVE_DIR+'exp_cifar_'+sig+'_'+str(l)+'_'+str(k)+'.pkl','rb')
+def doit(sig,k,doplot=1):
+    f=open(SAVE_DIR+'exp_cnn_cifar_'+sig+'_'+str(k)+'.pkl','rb')
     LOSSES1,reconstruction1,x1,samplesclass01,samplesclass11,W1=cPickle.load(f)
     f.close()
     if(doplot==0): return concatenate(LOSSES1)
-    w = W1[-1][0]
-    LLL = []
+    w = W1[0]
+    for i in xrange(w.shape[0]):
+        figure(figsize=(2,2))
+        imshow(normalize(reshape(w[i,0],(5,5,3))),aspect='auto',interpolation='nearest')
+        xticks([])
+        yticks([])
+        tight_layout()
+        savefig('BASE_EXP/CNN_CIFAR/w_'+sig+'_c'+str(k)+'_r0_'+str(i)+'.png')
+        close()
+        figure(figsize=(2,2))
+        imshow(normalize(reshape(w[i,1],(5,5,3))),aspect='auto',interpolation='nearest')
+        xticks([])
+        yticks([])
+        tight_layout()
+        savefig('BASE_EXP/CNN_CIFAR/w_'+sig+'_c'+str(k)+'_r1_'+str(i)+'.png')
+        close()
     for i in xrange(150):
         figure(figsize=(2,2))
         imshow(normalize(x1[i]),aspect='auto',interpolation='nearest')
         xticks([])
         yticks([])
         tight_layout()
-        savefig('BASE_EXP/DENSE_CIFAR/x'+sig+'_'+str(l)+'_'+str(k)+'_'+str(i)+'.png')
+        savefig('BASE_EXP/CNN_CIFAR/x_'+sig+'_c'+str(k)+'_'+str(i)+'.png')
         close()
     for i in xrange(150):
-	LLL.append(((x1[i]-reconstruction1[-1][i])**2).sum())
         figure(figsize=(2,2))
-        imshow(normalize(reconstruction1[-1][i]),aspect='auto',interpolation='nearest')
+        imshow(normalize(reconstruction1[i]),aspect='auto',interpolation='nearest')
         xticks([])
         yticks([])
         tight_layout()
-        savefig('BASE_EXP/DENSE_CIFAR/reconstruction_x'+sig+'_'+str(l)+'_'+str(k)+'_'+str(i)+'.png')
+        savefig('BASE_EXP/CNN_CIFAR/reconstruction_x_'+sig+'_c'+str(k)+'_'+str(i)+'.png')
         close()
-    print mean(LLL)
-#    for i in xrange(4):
-#	figure(figsize=(20,2))
-#	for ii in xrange(10):
-#	    imshow(normalize(samplesclass11[-1][0][i*10+ii]),aspect='auto',interpolation='nearest')
-#            xticks([])
-#            yticks([])
-#        tight_layout()
-#        savefig('BASE_EXP/DENSE_CIFAR/samples1_'+sig+'_'+str(l)+'_c'+str(k)+'_n'+str(i)+'.png')
-#        close()
+    for i in xrange(4):
+	figure(figsize=(20,2))
+	for ii in xrange(10):
+	    subplot(1,10,1+ii)
+	    imshow(normalize(samplesclass11[0][i*10+ii]),aspect='auto',interpolation='nearest')
+            xticks([])
+            yticks([])
+        tight_layout()
+        savefig('BASE_EXP/CNN_CIFAR/samples1_'+sig+'_c'+str(k)+'_n'+str(i)+'.png')
+        close()
 #    for n in xrange(150):
 #        figure(figsize=(3,3))
 #        imshow(normalize(samplesclass11[-1][0][n]),aspect='auto',interpolation='nearest')
@@ -83,27 +96,14 @@ def doit(sig,l,k,doplot=1):
     return concatenate(LOSSES1)
 
 
-for c in [0,1,2,3,4,5,6,7,8,9]:
-	print "diagonal 3"
-	loss1 = doit('local',3,c,1)
-	print "isotropic 3"
-	loss2 = doit('global',3,c,1)
-	print "diagonal 2"
-        loss3 = doit('local',2,c,1)
-	print "isotropic 2"
-        loss4 = doit('global',2,c,1)
-	print "\n\n"
-#	print "C",c
-#	print loss3[-1],loss1[-1]
-#	print loss4[-1],loss2[-1]
-#	plot(unique(loss1),c='k',ls='-')
-##        plot(unique(loss2),c='k',ls='--')
-##        plot(unique(loss3),c='b',ls='-')
-##        plot(unique(loss4),c='b',ls='--')
-#	ylim([-2000,6000])
-#        tight_layout()
-#        savefig('BASE_EXP/cifar/loss_'+str(c)+'.png')
-#        close()
+for c in [0]:
+	loss1 = doit('channel',c,1)
+	print "C",c
+	print loss1[-1]
+	plot(unique(loss1),c='k',ls='-')
+        tight_layout()
+        savefig('BASE_EXP/CNN_CIFAR/loss_'+str(c)+'.png')
+        close()
 
 
 
