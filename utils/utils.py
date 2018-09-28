@@ -137,19 +137,17 @@ class model:
     def get_params(self):
         params = []
         for l in self.layers[1:]:
-            if(isinstance(l,layers_.ConvPoolLayer)):
+            if(isinstance(l,layers_.ConvPoolLayer) or isinstance(l,layers_.FinalLayer)):
                 params.append([self.session.run(l.W),self.session.run(l.sigmas2_),self.session.run(l.pi),self.session.run(l.b_)])
             else:
                 params.append([self.session.run(l.W),self.session.run(l.sigmas2_),self.session.run(l.pi),self.session.run(l.b_),self.session.run(l.V_)])
-        return Ws
-
-
-    def layer_E_step(self,lay,random=1,fineloss=1,verbose=0):
+        return params
+    def layer_E_step(self,l,random=1,fineloss=1,verbose=0):
         loss = []
         GAIN = self.session.run(self.KL)
-	if(lay==0): self.session.run(self.updates_firstlayer)
-	if(lay<len(self.updates_v2)):
-            self.session.run(self.updates_v2[lay])
+	if(l==0): self.session.run(self.updates_firstlayer)
+	if(l<len(self.updates_v2)):
+            self.session.run(self.updates_v2[l])
             if(verbose): print 'V2',l,self.session.run(self.KL)
         if(random==0): iih = self.layers[l+1].m_indices
         else:   iih = self.layers[l+1].m_indices[permutation(len(self.layers[l+1].m_indices))]
@@ -167,8 +165,8 @@ class model:
             if(verbose): print 'M',l,self.session.run(self.KL)
 	else:
             self.session.run(self.update_last_p)
-            loss.append(L = self.session.run(self.KL))
-            if(verbose): print 'P',l,self.session.run(loss[-1])
+            loss.append(self.session.run(self.KL))
+            if(verbose): print 'P',l,loss[-1]
         L = self.session.run(self.KL)
         return L-GAIN
     def layer_M_step(self,lay,random=1,fineloss=1,verbose=0):

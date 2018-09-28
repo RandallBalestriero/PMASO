@@ -5,7 +5,7 @@ import itertools
 from math import pi as PI_CONST
 
 
-eps = float32(0.00000000000000001)
+eps = float32(0.000000000000000000001)
 
 class BN:
     def __init__(self,center,scale):
@@ -151,7 +151,7 @@ class DenseLayer:
 		k4  = -float32(self.D_in/2.0)*tf.log(2*PI_CONST)/float32(self.bs)
                 a1  = -tf.einsum('nd,d->',tf.square(self.input_-self.b-self.backward(1)),1/self.sigmas2_)/float32(self.bs)                    #(1)
 		if(isinstance(self.input_layer,DenseLayer)): a2  = -tf.einsum('dn,d->',self.input_layer.v2_,1/self.sigmas2_)/float32(self.bs)  #(1)
-		else:              a2  = -tf.einsum('nd,d->'tf.reshape(tf.reduce_mean(self.input_layer.v2,0),[self.D_in]),1/self.sigmas2_)/float32(self.bs) #(1)
+		else:              a2  = -tf.reduce_sum(tf.reshape(tf.reduce_mean(self.input_layer.v2,0),[self.D_in])/self.sigmas2_)/float32(self.bs) #(1)
                 a3  = tf.einsum('kdn,d->',tf.square(tf.einsum('krd,knr->kdn',self.W,self.p_*tf.expand_dims(self.m_*self.drop_[:,1],-1))),1/self.sigmas2_)/float32(self.bs)
                 a4  = -tf.einsum('kr,krd,d->',tf.einsum('kn,knr->kr',self.drop_[:,1]*(self.v2_+tf.square(self.m_)),self.p_),tf.square(self.W),1/self.sigmas2_)/float32(self.bs)
                 return k0+k1+k2+k3+k4+float32(0.5)*(a1+a2+a3+a4)-self.sparsity_prior*tf.reduce_sum(tf.square(self.W))
@@ -643,13 +643,13 @@ class FinalLayer:
 		else:             return tf.reshape(tf.tensordot(K,self.W,[[1,2],[0,1]])+noise+self.b,self.input_shape)
         def likelihood(self):
                 k1  = -tf.reduce_sum(tf.log(self.sigmas2_)/2)
-                k2  = tf.einsum('unr,ur->',self.p_,tf.log(self.pi))/self.float32(self.bs)
+                k2  = tf.einsum('unr,ur->',self.p_,tf.log(self.pi))/float32(self.bs)
 		k3  = -float32(self.D_in/2.0)*tf.log(2*PI_CONST)/float32(self.bs)
-                a1  = -tf.einsum('nd,d->',tf.square(self.input_-self.b-self.backward(1)),1/self.sigmas2_)/self.float32(self.bs)
-                if(isinstance(self.input_layer,DenseLayer)): a2  = -tf.einsum('kd,k->',self.input_layer.v2_,1/self.sigmas2_)/self.float32(self.bs)
-		else: -tf.einsum('kd,k->',tf.reshape(tf.reduce_mean(self.input_layer.v2,0),[self.D_in]),1/self.sigmas2_)/self.float32(self.bs)
-                a3  = -tf.einsum('nr,rd,d->',self.p_[0],tf.square(self.W[0]),1/self.sigmas2_)/self.float32(self.bs) #(N D) -> (D)
-                a4  = tf.einsum('nd,d->',tf.square(tf.tensordot(self.p_[0],self.W[0],[[1],[0]])),self.sigmas2_)/self.float32(self.bs) #(D)
+                a1  = -tf.einsum('nd,d->',tf.square(self.input_-self.b-self.backward(1)),1/self.sigmas2_)/float32(self.bs)
+                if(isinstance(self.input_layer,DenseLayer)): a2  = -tf.einsum('kd,k->',self.input_layer.v2_,1/self.sigmas2_)/float32(self.bs)
+		else: -tf.einsum('kd,k->',tf.reshape(tf.reduce_mean(self.input_layer.v2,0),[self.D_in]),1/self.sigmas2_)/float32(self.bs)
+                a3  = -tf.einsum('nr,rd,d->',self.p_[0],tf.square(self.W[0]),1/self.sigmas2_)/float32(self.bs) #(N D) -> (D)
+                a4  = tf.einsum('nd,d->',tf.square(tf.tensordot(self.p_[0],self.W[0],[[1],[0]])),self.sigmas2_)/float32(self.bs) #(D)
                 return k1+k2+k3+(a1+a2+a3+a4)*float32(0.5)
         def KL(self):
                 return self.likelihood()-tf.reduce_sum(self.p*tf.log(self.p+eps))/float32(self.bs)
