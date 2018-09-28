@@ -56,8 +56,9 @@ else:
     model1.init_dataset(XX)
 
 
+LOSSES = []
 for i in xrange(8):
-    LOSSE=train_layer_model(model1,rcoeff_schedule=schedule(0.000000000001,'linear'),CPT=20,random=0,fineloss=0,verbose=0)
+    LOSSES.append(train_layer_model(model1,rcoeff_schedule=schedule(0.000000000001,'linear'),CPT=20,random=0,fineloss=0,verbose=0))
     reconstruction = model1.reconstruct()[:150]
     samplesclass0 = [model1.sampleclass(0,k)[:150] for k in xrange(neuronsss)]
     samplesclass1 = [model1.sampleclass(1,k)[:150] for k in xrange(neuronsss)]
@@ -66,7 +67,7 @@ for i in xrange(8):
         f=open(SAVE_DIR+'exp_cnn_'+DATASET.lower()+'_'+sigmass+'_'+str(classs)+'.pkl','wb')
     else:
         f=open(SAVE_DIR+'exp_cnn_'+DATASET.lower()+'_'+sigmass+'.pkl','wb')
-    cPickle.dump([LOSSE,reconstruction,XX[:150],samplesclass0,samplesclass1,W],f)
+    cPickle.dump([LOSSES,reconstruction,XX[:150],samplesclass0,samplesclass1,W],f)
     f.close()
 
 

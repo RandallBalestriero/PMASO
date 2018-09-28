@@ -134,44 +134,41 @@ class model:
 	    else:
                 Ws.append(self.session.run(l.W))
 	return Ws
+    def get_params(self):
+        params = []
+        for l in self.layers[1:]:
+            if(isinstance(l,layers_.ConvPoolLayer)):
+                params.append([self.session.run(l.W),self.session.run(l.sigmas2_),self.session.run(l.pi),self.session.run(l.b_)])
+            else:
+                params.append([self.session.run(l.W),self.session.run(l.sigmas2_),self.session.run(l.pi),self.session.run(l.b_),self.session.run(l.V_)])
+        return Ws
+
+
     def layer_E_step(self,lay,random=1,fineloss=1,verbose=0):
         loss = []
-	l    = lay
         GAIN = self.session.run(self.KL)
 	if(lay==0): self.session.run(self.updates_firstlayer)
-	if(l<len(self.updates_v2)):
-            t = time.time()
+	if(lay<len(self.updates_v2)):
             self.session.run(self.updates_v2[lay])
             if(verbose): print 'V2',l,self.session.run(self.KL)
-        if(random==0):
-            iih = self.layers[l+1].m_indices
-        else:
-            perm = permutation(len(self.layers[l+1].m_indices))
-            iih = self.layers[l+1].m_indices[perm]
+        if(random==0): iih = self.layers[l+1].m_indices
+        else:   iih = self.layers[l+1].m_indices[permutation(len(self.layers[l+1].m_indices))]
 	if(isinstance(self.layers[l+1],layers_.ConvPoolLayer)): # ALL BUT THE LAST LAYER
-	    t = time.time()
             for i in iih:
                 self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
                                                                         self.layers[l+1].j_:int32(i[1]),
                                                                         self.layers[l+1].k_:int32(i[2])})
-                if(fineloss):
-                    t=time.time()
-                    L = self.session.run(self.KL)
-                    loss.append(L)
+                if(fineloss):loss.append(self.session.run(self.KL))
             if(verbose): print 'M',l,self.session.run(self.KL)
 	elif(isinstance(self.layers[l+1],layers_.DenseLayer)):
             for i in iih:
 		self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].k_:int32(i)})
-                if(fineloss):
-                    t=time.time()
-                    L = self.session.run(self.KL)
-                    loss.append(L)
+                if(fineloss):loss.append(self.session.run(self.KL))
             if(verbose): print 'M',l,self.session.run(self.KL)
 	else:
             self.session.run(self.update_last_p)
-            L = self.session.run(self.KL)
-            loss.append(L)
-            if(verbose): print 'P',l,self.session.run(self.KL)
+            loss.append(L = self.session.run(self.KL))
+            if(verbose): print 'P',l,self.session.run(loss[-1])
         L = self.session.run(self.KL)
         return L-GAIN
     def layer_M_step(self,lay,random=1,fineloss=1,verbose=0):
@@ -183,20 +180,13 @@ class model:
         if(verbose): print 'SIGMA ',str(l),self.session.run(self.like)
         self.session.run(self.updates_BV[l])
 	if(verbose): print 'BV',self.session.run(self.like)
-        if(random==0):
-            iih = self.layers[l+1].W_indices
-        else:
-            perm = permutation(len(self.layers[l+1].W_indices))
-            iih = self.layers[l+1].W_indices[perm]
+        if(random==0): iih = self.layers[l+1].W_indices
+        else: iih = self.layers[l+1].W_indices[permutation(len(self.layers[l+1].W_indices))]
         if(isinstance(self.layers[l+1],layers_.DenseLayer)):
             t=time.time()
             for kk in iih:
                 self.session.run(self.updates_Wk[l],feed_dict={self.layers[l+1].k_:int32(kk)})
-                newtime = time.time()-t
-                if(fineloss):
-                    t=time.time()
-                    L = self.session.run(self.like)
-                    loss.append(L)
+                if(fineloss): loss.append(self.session.run(self.like))
 	    if(verbose): print 'DW',self.session.run(self.like)
         elif(isinstance(self.layers[l+1],layers_.ConvPoolLayer)):
             t=time.time()
@@ -205,27 +195,20 @@ class model:
 								self.layers[l+1].k_:int32(kk[0]),
 								self.layers[l+1].i_:int32(kk[2]),
 								self.layers[l+1].j_:int32(kk[3])})
-                if(fineloss):
-                    t=time.time()
-                    L = self.session.run(self.like)
-                    loss.append(L)
+                if(fineloss):loss.append(self.session.run(self.like))
 	    if(verbose): print 'CW',self.session.run(self.like),
         else:# LAST LAYER
             self.session.run(self.updates_Wk[-1])
-            if(fineloss):
-                L = self.session.run(self.like)
-                loss.append(L)
+            if(fineloss): loss.append(self.session.run(self.like))
 	    if(verbose): print 'LW',self.session.run(self.like),
         self.session.run(self.updates_pi[l])
 	if(verbose): print 'PI',self.session.run(self.like)
-        if(fineloss):
-            L = self.session.run(self.like)
-            loss.append(L) 
+        if(fineloss): loss.append(self.session.run(self.like)) 
         L = self.session.run(self.like)
         return L-GAIN
     def E_step(self,rcoeff,fineloss=0,random=0,verbose=0):
         GAINS      = 0
-	LAYER_GAIN =rcoeff*2
+	LAYER_GAIN = rcoeff*2
 	mini_cpt   = 0
         print 'Beginning of E-step...',self.session.run(self.KL),self.session.run(self.like)
         while(LAYER_GAIN>rcoeff and mini_cpt<80):
@@ -233,11 +216,10 @@ class model:
             LAYER_GAIN = 0
             for l in range(self.L-1):
                 layer_cpt,g_ = 0,rcoeff+1
-                while(g_>rcoeff and layer_cpt<40):
+                while(g_>rcoeff and layer_cpt<80):
                     layer_cpt += 1
                     g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose)
                     LAYER_GAIN+=g_
-#                    print "gain:",g_,">",rcoeff/(self.L-1)
 	    GAINS+= LAYER_GAIN
 	return GAINS
     def M_step(self,rcoeff,fineloss=0,random=0,verbose=0):
@@ -245,7 +227,7 @@ class model:
 	print 'Beginning of M-step...',self.session.run(self.like),self.session.run(self.KL)
         for l in range(self.L-1):
             layer_cpt,g_ = 0,rcoeff+1
-            while(g_>rcoeff and layer_cpt<40):
+            while(g_>rcoeff and layer_cpt<80):
                 g_=self.layer_M_step(l,random=random,fineloss=fineloss,verbose=verbose)
                 GAINS+=g_
 	return GAINS
@@ -312,11 +294,8 @@ def train_layer_model(model,rcoeff_schedule,CPT,random=0,fineloss=1,return_time=
         g = model.M_step(rcoeff=rcoeff_schedule.lr(cpt),random=random,fineloss=fineloss,verbose=verbose)
 	LIKE.append(model.session.run(model.like))
         print "AFTER M",LIKE[-3:]
-	GAIN = g#LIKE[-1]-LIKE[-2]
-    return LIKE#LOSSES,GAINS
-
-
-
+	GAIN = g
+    return LIKE
 
 
 ###################################################################
@@ -326,7 +305,6 @@ def train_layer_model(model,rcoeff_schedule,CPT,random=0,fineloss=1,return_time=
 #
 #
 ###################################################################
-
 
 
 import cPickle
@@ -344,8 +322,6 @@ def load_data(DATASET,k=-1):
         y             = mnist.target.astype('int32')
         x_train,x_test,y_train,y_test = train_test_split(x,y,test_size=10000,stratify=y)
         input_shape   = (batch_size,28,28,1)
-#	x_train = transpose(x_train,[0,2,3,1])
-#	x_test  = transpose(x_test,[0,2,3,1])
 	c = 10
         n_epochs = 150
 
@@ -357,9 +333,6 @@ def load_data(DATASET,k=-1):
         input_shape       = (batch_size,32,32,3)
         x_train = transpose(x_train,[0,2,3,1])
         x_test  = transpose(x_test,[0,2,3,1])
-#	c=10
-#        n_epochs = 150
-#        iii = [i for i in xrange(len(y_train)) if(y_train[i]==0)]
 	if(k>=0):
 	    x_train = x_train[y_train==k]
 	    y_train = y_train[y_train==k]
