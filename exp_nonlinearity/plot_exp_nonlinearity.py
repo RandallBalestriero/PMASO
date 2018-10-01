@@ -8,136 +8,86 @@ mpl.rcParams['ytick.labelsize'] = label_size
 
 fs=15
 
-
-
-def plotclasses(classes,samplesclass1):
-    for i,k in zip(range(len(classes)),classes):
-        for j in xrange(10):
-            subplot(len(classes),10,1+i*10+j)
-            imshow(samplesclass1[k][j,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-            xticks([])
-            yticks([])
+import os
+SAVE_DIR = os.environ['SAVE_DIR']
 
 
 
 
 
-def doit():
-    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_nonlinearity_relu.pkl','rb')
+def doit(DATASET,sigmass,leakiness,plot=1):
+    f=open(SAVE_DIR+'exp_nonlinearity_'+DATASET+'_'+sigmass+'_'+leakiness+'.pkl','rb')
     LOSSES0,reconstruction0,x0,samplesclass00,samplesclass10,samples10,W0,sigmas0=cPickle.load(f)
+    print LOSSES0
     f.close()
-    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_nonlinearity_abs.pkl','rb')
-    LOSSES1,reconstruction1,x1,samplesclass01,samplesclass11,samples11,W1,sigmas1=cPickle.load(f)
-    f.close()
-    f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_nonlinearity_None.pkl','rb')
-    LOSSES2,reconstruction2,x2,samplesclass02,samplesclass12,samples12,W2,sigmas2=cPickle.load(f)
-    f.close()
-    figure(figsize=(15,3))
-    for i in xrange(6):
-        subplot(2,6,1+i)
+    LL = []
+    if(plot==0):return LOSSES0
+    for i in xrange(15):
+	figure(figsize=(2,2))
         imshow(x0[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
         xticks([])
         yticks([])
-        subplot(2,6,7+i)
+        tight_layout()
+        savefig('../BASE_EXP/nonlinearity/x_'+sigmass+'_'+leakiness+'_'+str(i)+'.png')
+	close()
+        figure(figsize=(2,2))
         imshow(reconstruction0[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
         xticks([])
         yticks([])
-    tight_layout()
-    savefig('BASE_EXP/nonlinearity/reconstruction_0.png')
-    close()
-    figure(figsize=(15,3))
-    for i in xrange(6):
-        subplot(2,6,1+i)
-        imshow(x1[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-        subplot(2,6,7+i)
-        imshow(reconstruction1[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-    tight_layout()
-    savefig('BASE_EXP/nonlinearity/reconstruction_1.png')
-    close()
-    figure(figsize=(15,3))
-    for i in xrange(6):
-        subplot(2,6,1+i)
-        imshow(x1[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-        subplot(2,6,7+i)
-        imshow(reconstruction2[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-    tight_layout()
-    savefig('BASE_EXP/nonlinearity/reconstruction_2.png')
-    close()
+        tight_layout()
+        savefig('../BASE_EXP/nonlinearity/reconstruction_'+sigmass+'_'+leakiness+'_'+str(i)+'.png')
+	close()
+    for k in xrange(10):
+        for i in xrange(20):
+	    figure(figsize=(2,2))
+            imshow(samplesclass00[k][i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
+            xticks([])
+            yticks([])
+	    tight_layout()
+            savefig('../BASE_EXP/nonlinearity/samples0_'+sigmass+'_'+leakiness+'_'+str(k)+'_'+str(i)+'.png')
+	    close()	
+            figure(figsize=(2,2))
+            imshow(samplesclass10[k][i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
+            xticks([])
+            yticks([])
+            tight_layout()
+            savefig('../BASE_EXP/nonlinearity/samples1_'+sigmass+'_'+leakiness+'_'+str(k)+'_'+str(i)+'.png')
+	    close()
+    return LOSSES0
 
 
+#l1=doit('MNIST','global','-1',1)
+#l1=doit('MNIST','global','0',1)
+#l1=doit('MNIST','global','0.01',1)
+#l1=doit('MNIST','global','None',1)
 
-#        figure(figsize=(15,3))
-#        classes=[0]
-#        plotclasses(classes,samplesclass1[s])
-#        tight_layout()
-#        savefig('BASE_EXP/fc_threeclass1_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
-#        close()
-
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass10)
-    tight_layout()
-    savefig('BASE_EXP/nonlinearity/tenclass1_0.png')
-    close()
-
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass11)
-    tight_layout()
-    savefig('BASE_EXP/nonlinearity/tenclass1_1.png')
-    close()
-
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass12)
-    tight_layout()
-    savefig('BASE_EXP/nonlinearity/tenclass1_2.png')
-    close()
+#l1=doit('flippedMNIST','global','-1',1)
+l1=doit('MNIST','global','0',1)
+#l1=doit('flippedMNIST','global','0.01',1)
+#l1=doit('flippedMNIST','global','None',1)
 
 
-#        figure(figsize=(15,3))
-#        classes=[0]
-#        plotclasses(classes,samplesclass0[s])
-#        tight_layout()
-#        savefig('BASE_EXP/fc_threeclass0_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
-#        close()
-
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass00)
-    tight_layout()
-    savefig('BASE_EXP/nonlinearity/tenclass0_0.png')
-    close()
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass01)
-    tight_layout()
-    savefig('BASE_EXP/nonlinearity/tenclass0_1.png')
-    close()
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass02)
-    tight_layout()
-    savefig('BASE_EXP/nonlinearity/tenclass0_2.png')
-    close()
-
-    figure(figsize=(15,15))
-    plot(LOSSES0,c='black')
-    plot(LOSSES1,c='blue')
-    plot(LOSSES2,c='red')
-    savefig('BASE_EXP/nonlinearity/losses.png')
-    close()
+print l1
+awd
+#l2=doit('global','0',0)
+#l3=doit('global','0.01',0)
+#l4=doit('global','None',0)
 
 
+plot(range(len(l1)),l1,c='k')
+plot(range(len(l1))[3::20],l1[3::20],linestyle='None',c='k',marker='x')
 
-doit()
+plot(range(len(l1)),l1,c='k')
+plot(range(len(l1))[3::20],l1[3::20],linestyle='None',c='k',marker='o')
+
+plot(range(len(l1)),l1,c='k')
+plot(range(len(l1))[3::20],l1[3::20],linestyle='None',c='k',marker='s')
+
+plot(range(len(l1)),l1,c='k')
+#plot(range(len(l1))[3::20],l1[3::20],c='k',ls='x')
+
+tight_layout()
+
+savefig('../BASE_EXP/nonlinearity/losses.png')
 
 

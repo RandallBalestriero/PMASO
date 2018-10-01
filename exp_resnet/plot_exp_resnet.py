@@ -15,109 +15,62 @@ fs=15
 
 
 
-def plotclasses(classes,samplesclass1):
-    for i,k in zip(range(len(classes)),classes):
-        for j in xrange(10):
-            subplot(len(classes),10,1+i*10+j)
-            imshow(samplesclass1[k][j,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-            xticks([])
-            yticks([])
 
 
-
-
-
-def doit(l):
-    f=open(SAVE_DIR+'exp_resnet_0_'+str(l)+'.pkl','rb')
-    LOSSES0,reconstruction0,x0,samplesclass00,samplesclass10,samples10,W0,sigmas0=cPickle.load(f)
+def doit(neurons,layers,residual,sigmas,plotit=1):
+    f=open(SAVE_DIR+'exp_resnet_'+neurons+'_'+layers+'_'+residual+'_'+sigmas+'.pkl','rb')
+    print 'exp_resnet_'+neurons+'_'+layers+'_'+residual+'_'+sigmas
+    LOSSES,reconstruction,x0,samplesclass0,samplesclass1,samples1,params=cPickle.load(f)
     f.close()
-    f=open(SAVE_DIR+'exp_resnet_1_'+str(l)+'.pkl','rb')
-    LOSSES1,reconstruction1,x1,samplesclass01,samplesclass11,samples11,W1,sigmas1=cPickle.load(f)
-    f.close()
-    figure(figsize=(15,3))
-    for i in xrange(6):
-        subplot(2,6,1+i)
+    if(plotit==0): return LOSSES
+    LLL=[]
+    for i in xrange(150):
+	figure(figsize=(2,2))
         imshow(x0[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
         xticks([])
         yticks([])
-        subplot(2,6,7+i)
-        imshow(reconstruction0[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
+        tight_layout()
+        savefig('../BASE_EXP/resnet/x_'+neurons+'_'+layers+'_'+residual+'_'+sigmas+'_'+str(i)+'.png')
+	close()
+        figure(figsize=(2,2))
+        imshow(reconstruction[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
         xticks([])
         yticks([])
-    tight_layout()
-    savefig('BASE_EXP/resnet/reconstruction_0_'+str(l)+'.png')
-    close()
-    figure(figsize=(15,3))
-    for i in xrange(6):
-        subplot(2,6,1+i)
-        imshow(x1[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-        subplot(2,6,7+i)
-        imshow(reconstruction1[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-        xticks([])
-        yticks([])
-    tight_layout()
-    savefig('BASE_EXP/resnet/reconstruction_1_'+str(l)+'.png')
-    close()
-
-#        figure(figsize=(15,3))
-#        classes=[0]
-#        plotclasses(classes,samplesclass1[s])
-#        tight_layout()
-#        savefig('BASE_EXP/fc_threeclass1_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
-#        close()
-
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass10)
-    tight_layout()
-    savefig('BASE_EXP/resnet/tenclass1_0_'+str(l)+'.png')
-    close()
-
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass11)
-    tight_layout()
-    savefig('BASE_EXP/resnet/tenclass1_1_'+str(l)+'.png')
-    close()
+        tight_layout()
+        savefig('../BASE_EXP/resnet/reconstruction_'+neurons+'_'+layers+'_'+residual+'_'+sigmas+'_'+str(i)+'.png')
+	close()
+	LLL.append(((x0[i,:,:,0]-reconstruction[i,:,:,0])**2).sum())
+    print mean(LLL),len(LOSSES),LOSSES[-1]
+    for k in xrange(len(samplesclass0)):
+	for i in xrange(20):
+            figure(figsize=(2,2))
+            imshow(samplesclass0[k][i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
+            xticks([])
+            yticks([])
+            tight_layout()
+            savefig('../BASE_EXP/resnet/samples0_'+neurons+'_'+layers+'_'+residual+'_'+sigmas+'_'+str(k)+'_'+str(i)+'.png')
+	    close()
+            figure(figsize=(2,2))
+            imshow(samplesclass1[k][i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
+            xticks([])
+            yticks([])
+            tight_layout()
+            savefig('../BASE_EXP/resnet/samples1_'+neurons+'_'+layers+'_'+residual+'_'+sigmas+'_'+str(k)+'_'+str(i)+'.png')
+	    close()
+    return LOSSES
 
 
-#        figure(figsize=(15,3))
-#        classes=[0]
-#        plotclasses(classes,samplesclass0[s])
-#        tight_layout()
-#        savefig('BASE_EXP/fc_threeclass0_unsup'+str(unsup)+'_neurons'+str(neurons)+'_step'+str(s)+'.png')
-#        close()
+for l in ['2']:
+#    lo = doit('32',l,'0','global')
+    lo = doit('64','1','0','local',1)
+#    lo = doit('64','3','1','global',1)
+    print lo
+#    lo = doit('64','1','1','local',1)
+#    print lo
 
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass00)
-    tight_layout()
-    savefig('BASE_EXP/resnet/tenclass0_0_'+str(l)+'.png')
-    close()
-    figure(figsize=(15,15))
-    classes=range(10)
-    plotclasses(classes,samplesclass01)
-    tight_layout()
-    savefig('BASE_EXP/resnet/tenclass0_1_'+str(l)+'.png')
-    close()
+#    plot(lo)
+#    savefig('../BASE_EXP/resnet/loss_32_2_1_global.png')
 
-    figure(figsize=(15,15))
-    plot(LOSSES0,c='k')
-    plot(LOSSES1,c='r')
-    savefig('BASE_EXP/resnet/losses_'+str(l)+'.png')
-    close()
-
-
-
-#doit(5)
-doit(1)
-#doit(3)
-doit(2)
-
-#doit(1,1,'local','none','none')
-#doit(1,3,'local','none','none')
 
 
 

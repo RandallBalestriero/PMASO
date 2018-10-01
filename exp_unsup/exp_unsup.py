@@ -4,10 +4,17 @@ from sklearn.datasets import make_moons
 from sklearn.datasets import load_digits
 import tensorflow as tf
 
+
+import sys
+sys.path.insert(0, '../utils')
+
 from layers import *
 from utils import *
 
 import cPickle
+import os
+SAVE_DIR = os.environ['SAVE_DIR']
+
 
 
 def doit(pred,y,K):
@@ -17,14 +24,21 @@ def doit(pred,y,K):
 
 DATASET = 'MNIST'
 
-sigmass=sys.argv[-1]
+sigmass  = 'global'
+neurons = int(sys.argv[-1])
+
+if(sys.argv[-2]=='None'):
+        leakiness=None
+else:   
+        leakiness = float(sys.argv[-2])
+
 supss     = 0
 
 
 x_train,y_train,x_test,y_test = load_data(DATASET)
 
-pp = permutation(x_train.shape[0])[:1000]
-XX = x_train[pp]+randn(len(pp),1,28,28)*0.05
+pp = permutation(x_train.shape[0])[:8000]
+XX = x_train[pp]+randn(len(pp),1,28,28)*0.01
 YY = y_train[pp]
 
 XX = transpose(XX,[0,2,3,1])
@@ -32,10 +46,9 @@ x_test = transpose(x_test,[0,2,3,1])
 input_shape = XX.shape
 
 layers1 = [InputLayer(input_shape)]
-#layers1.append(DenseLayer(layers1[-1],K=16,R=2,nonlinearity=None,sparsity_prior=0.,sigma=sigmass,learn_pi=1,p_drop=0.,bn=BN(0,0),U=0))
-layers1.append(ConvPoolLayer(layers1[-1],Ic=3,Jc=3,Ir=2,Jr=2,K=6,R=2,nonlinearity=None,sparsity_prior=0.0,sigma='local'))
-#layers1.append(DenseLayer(layers1[-1],K=64,R=2,nonlinearity=None,sparsity_prior=0.,sigma=sigmass,learn_pi=1,p_drop=0.2,bn=BN(0,0),U=0))
-layers1.append(FinalLayer(layers1[-1],R=10,sparsity_prior=0.,sigma=sigmass,bn=BN(0,0)))
+layers1.append(DenseLayer(layers1[-1],K=32*neurons,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass))
+layers1.append(DenseLayer(layers1[-1],K=16*neurons,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass))
+layers1.append(FinalLayer(layers1[-1],R=10*neurons,sparsity_prior=0.,sigma=sigmass))
 
 model1 = model(layers1)
 
@@ -45,28 +58,18 @@ else:
     model1.init_dataset(XX)
 
 
-y_hat = argmax(model1.predict(),1)
-
-doit(y_hat,YY,10)
-
-for k in xrange(140):
-    LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(0.0000000001,'sqrt'),CPT=1,random=1,fineloss=0,verbose=1)
-    #model1.init_dataset(x_train[2000*i:2000*(i+1)])
-    #model1.init_thetaq()
-    #model1.E_step(10)
-    y_hat = argmax(model1.predict(),1)
-#    for i in xrange(10):
-    print bincount(y_hat,None,10)
-    doit(y_hat,YY,10)
+LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(0.00000000001,'sqrt'),CPT=100,random=0,fineloss=0,verbose=0)
+y_hat   = argmax(model1.predict(),1)
+CL      = doit(y_hat,YY,10*neurons)
 
 reconstruction = model1.reconstruct()[:150]
-for k in xrange(5):
-    subplot(1,5,k+1)
-    imshow(reconstruction[k,:,:,0])
-show()
-#f=open('/mnt/project2/rb42Data/PMASO/BASE_EXP/exp_unsup_'+str(neuronsss)+'.pkl','wb')
-#cPickle.dump([LOSSES,reconstruction,XX[:2000],samplesclass0,samplesclass1,samples1,W,sigmas,pred],f)
-#f.close()
+samplesclass0=[model1.sampleclass(0,k)[:150] for k in xrange(10*neurons)]
+samplesclass1=[model1.sampleclass(1,k)[:150] for k in xrange(10*neurons)]
+samples1=model1.sample(1)[:300]
+
+f=open(SAVE_DIR+'exp_unsup_'+sys.argv[-2]+'_'+str(neurons)+'.pkl','wb')
+cPickle.dump([LOSSES,samplesclass0,samplesclass1,samples1,CL],f)
+f.close()
 
 
 

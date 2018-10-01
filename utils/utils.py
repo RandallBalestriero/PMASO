@@ -110,7 +110,8 @@ class model:
         self.initop_thetaq      = [l.init_thetaq() for l in layers]
         ### WEIGHTS UPDATES OP
 	self.updates_BV      = [l.update_BV() for l in layers[1:]]
-        self.updates_m       = [l.update_m() for l in layers[1:-1]]
+        self.updates_m       = [l.update_m(0) for l in layers[1:-1]]
+        self.updates_p       = [l.update_m(1) for l in layers[1:-1]]
 	self.updates_v2      = [l.update_v2() for l in layers[1:-1]]
 	self.updates_firstlayer = tf.group(layers[0].update_v2(),layers[0].update_m())
 	self.update_last_p   = layers[-1].update_p() # SEPARATE DEPENDING ON SUP UNSUP TRAINING
@@ -142,27 +143,55 @@ class model:
             else:
                 params.append([self.session.run(l.W),self.session.run(l.sigmas2_),self.session.run(l.pi),self.session.run(l.b_),self.session.run(l.V_)])
         return params
-    def layer_E_step(self,l,random=1,fineloss=1,verbose=0):
+    def layer_E_step(self,l,random=1,fineloss=1,verbose=0,mp_opt=0):
         loss = []
         GAIN = self.session.run(self.KL)
 	if(l==0): self.session.run(self.updates_firstlayer)
 	if(l<len(self.updates_v2)):
+	    if(verbose): print 'V2 BEFORE',l,self.session.run(self.KL),self.session.run(self.like)
             self.session.run(self.updates_v2[l])
-            if(verbose): print 'V2',l,self.session.run(self.KL)
+            if(verbose): print 'V2',l,self.session.run(self.KL),self.session.run(self.like)
         if(random==0): iih = self.layers[l+1].m_indices
         else:   iih = self.layers[l+1].m_indices[permutation(len(self.layers[l+1].m_indices))]
-	if(isinstance(self.layers[l+1],layers_.ConvPoolLayer)): # ALL BUT THE LAST LAYER
+	if(isinstance(self.layers[l+1],layers_.ConvPoolLayer)):
             for i in iih:
+                self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
+                                                                        self.layers[l+1].j_:int32(i[1]),
+                                                                        self.layers[l+1].k_:int32(i[2])})
+                if(fineloss):loss.append(self.session.run(self.KL)) 
                 self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
                                                                         self.layers[l+1].j_:int32(i[1]),
                                                                         self.layers[l+1].k_:int32(i[2])})
                 if(fineloss):loss.append(self.session.run(self.KL))
-            if(verbose): print 'M',l,self.session.run(self.KL)
+            if(verbose): print 'P',l,self.session.run(self.KL)
 	elif(isinstance(self.layers[l+1],layers_.DenseLayer)):
-            for i in iih:
-		self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].k_:int32(i)})
-                if(fineloss):loss.append(self.session.run(self.KL))
-            if(verbose): print 'M',l,self.session.run(self.KL)
+	    if(verbose): print 'BEFORE M',l,self.session.run(self.KL),self.session.run(self.like)
+	    if(mp_opt==0):
+                for i in iih:
+                    self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].k_:int32(i)})
+                    if(fineloss):loss.append(self.session.run(self.KL))
+                if(verbose): print 'M',l,self.session.run(self.KL),self.session.run(self.like)
+                for i in iih:
+                    self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].k_:int32(i)})
+                    if(fineloss):loss.append(self.session.run(self.KL))
+                if(verbose): print 'P',l,self.session.run(self.KL),self.session.run(self.like)
+	    elif(mp_opt==1):
+                for i in iih:
+                    self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].k_:int32(i)})
+                if(verbose): print 'M',l,self.session.run(self.KL),self.session.run(self.like)
+                for i in iih:
+                    self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].k_:int32(i)})
+                if(verbose): print 'P',l,self.session.run(self.KL),self.session.run(self.like)
+	    elif(mp_opt==2):
+                for i in iih:
+                    self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].k_:int32(i)})
+                    self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].k_:int32(i)})
+                if(verbose): print 'P',l,self.session.run(self.KL),self.session.run(self.like)
+	    elif(mp_opt==3):
+                for i in iih:
+                    self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].k_:int32(i)})
+                    self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].k_:int32(i)})
+                if(verbose): print 'P',l,self.session.run(self.KL),self.session.run(self.like)
 	else:
             self.session.run(self.update_last_p)
             loss.append(self.session.run(self.KL))
@@ -181,13 +210,11 @@ class model:
         if(random==0): iih = self.layers[l+1].W_indices
         else: iih = self.layers[l+1].W_indices[permutation(len(self.layers[l+1].W_indices))]
         if(isinstance(self.layers[l+1],layers_.DenseLayer)):
-            t=time.time()
             for kk in iih:
                 self.session.run(self.updates_Wk[l],feed_dict={self.layers[l+1].k_:int32(kk)})
                 if(fineloss): loss.append(self.session.run(self.like))
 	    if(verbose): print 'DW',self.session.run(self.like)
         elif(isinstance(self.layers[l+1],layers_.ConvPoolLayer)):
-            t=time.time()
             for kk in iih:
                 self.session.run(self.updates_Wk[l],feed_dict={self.layers[l+1].r_:int32(kk[1]),
 								self.layers[l+1].k_:int32(kk[0]),
@@ -204,19 +231,19 @@ class model:
         if(fineloss): loss.append(self.session.run(self.like)) 
         L = self.session.run(self.like)
         return L-GAIN
-    def E_step(self,rcoeff,fineloss=0,random=0,verbose=0):
+    def E_step(self,rcoeff,fineloss=0,random=0,verbose=0,mp_opt=0):
         GAINS      = 0
-	LAYER_GAIN = rcoeff*2
-	mini_cpt   = 0
+	LAYER_GAIN = rcoeff+1
+#	mini_cpt   = 0
         print 'Beginning of E-step...',self.session.run(self.KL),self.session.run(self.like)
-        while(LAYER_GAIN>rcoeff and mini_cpt<80):
-            mini_cpt  +=1
+        while(LAYER_GAIN>rcoeff):
+#            mini_cpt  +=1
             LAYER_GAIN = 0
             for l in range(self.L-1):
-                layer_cpt,g_ = 0,rcoeff+1
-                while(g_>rcoeff and layer_cpt<80):
-                    layer_cpt += 1
-                    g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose)
+                g_ = rcoeff+1
+                while(g_>rcoeff):
+#                    layer_cpt += 1
+                    g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt)
                     LAYER_GAIN+=g_
 	    GAINS+= LAYER_GAIN
 	return GAINS
@@ -224,20 +251,19 @@ class model:
         GAINS = 0
 	print 'Beginning of M-step...',self.session.run(self.like),self.session.run(self.KL)
         for l in range(self.L-1):
-            layer_cpt,g_ = 0,rcoeff+1
-            while(g_>rcoeff and layer_cpt<80):
+            g_ = rcoeff+1
+            while(g_>rcoeff):
                 g_=self.layer_M_step(l,random=random,fineloss=fineloss,verbose=verbose)
                 GAINS+=g_
 	return GAINS
-    def E_step2(self,rcoeff,fineloss=0,random=0,verbose=0):
+    def E_step2(self,rcoeff,fineloss=0,random=0,verbose=0,mp_opt=0):
         GAINS      = 0
         g = rcoeff+1
-        layer_cpt = 0
-        while(g>rcoeff and layer_cpt<40):
-	    layer_cpt+=1
+#        layer_cpt = 0
+        while(g>rcoeff):
 	    g=0
             for l in range(self.L-1):
-                g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose)
+                g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt)
                 g+=g_
 	    GAINS+=g
 	return GAINS
@@ -279,20 +305,23 @@ class model:
 
 
 
-def train_layer_model(model,rcoeff_schedule,CPT,random=0,fineloss=1,return_time=0,verbose=0):
+def train_layer_model(model,rcoeff_schedule,CPT,random=0,fineloss=1,return_time=0,verbose=0,per_layer=0,mp_opt=0):
+    """ mp_opt : { 0,1,2,3}, m then p, p then m, mpmpmp, pmpmpm"""
     cpt  = 0
     LIKE = [model.session.run(model.like)]
     GAIN = 1
     print "INIT",model.session.run(model.KL),model.session.run(model.like)
-    while(cpt<CPT and GAIN>0):
+    while(cpt<CPT):# and GAIN>0):
         print cpt
         cpt         += 1
-	g = model.E_step(rcoeff=rcoeff_schedule.lr(cpt),random=random,fineloss=fineloss,verbose=verbose)
-	print "AFTER E",model.session.run(model.KL)
+	if(per_layer):f = model.E_step(rcoeff=rcoeff_schedule.lr(cpt),random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt)
+	else:  g = model.E_step2(rcoeff=rcoeff_schedule.lr(cpt),random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt)
+        print "AFTER E",model.session.run(model.KL)
         g = model.M_step(rcoeff=rcoeff_schedule.lr(cpt),random=random,fineloss=fineloss,verbose=verbose)
 	LIKE.append(model.session.run(model.like))
         print "AFTER M",LIKE[-3:]
 	GAIN = g
+	print "gain",g
     return LIKE
 
 
@@ -322,7 +351,16 @@ def load_data(DATASET,k=-1):
         input_shape   = (batch_size,28,28,1)
 	c = 10
         n_epochs = 150
-
+    elif(DATASET=='flippedMNIST'):
+        batch_size = 50
+        mnist         = fetch_mldata('MNIST original')
+        x             = mnist.data.reshape(70000,1,28,28).astype('float32')
+        y             = mnist.target.astype('int32')
+	signs = randint(0,2,len(x))*2-1
+        x_train,x_test,y_train,y_test = train_test_split(x*signs.reshape((-1,1,1,1)),y,test_size=10000,stratify=y)
+        input_shape   = (batch_size,28,28,1)
+        c = 10
+        n_epochs = 150
     elif(DATASET == 'CIFAR'):
         batch_size = 50
         TRAIN,TEST = load_cifar(3)
