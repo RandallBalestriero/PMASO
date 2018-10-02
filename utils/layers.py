@@ -5,7 +5,7 @@ import itertools
 from math import pi as PI_CONST
 
 
-eps = float32(0.0000000000000000000001)
+eps = float32(0.0000000000000001)
 
 class BN:
     def __init__(self,center,scale):
@@ -219,7 +219,7 @@ class DenseLayer:
 		if(self.residual):
 		    extra_v2 = tf.einsum('n,r->nr',self.v2_[self.k_],self.W[self.k_,:,self.k_]*self.V_[self.k_]/self.sigmas2_[self.k_])
 		else: extra_v2 = 0
-                new_p   = tf.scatter_update(self.p_,[self.k_],[mysoftmax((forward+prior-m2v2-extra_v2),coeff=0.00)])
+                new_p   = tf.scatter_update(self.p_,[self.k_],[mysoftmax((forward+prior-m2v2-extra_v2),coeff=eps)])
 		return new_p#tf.group([new_m,new_p])
 		if(self.p_drop==0):
 		    return tf.group(new_m,new_p)
@@ -741,6 +741,69 @@ class FinalLayer:
 		return tf.assign(self.b_,tf.reduce_sum(self.input_-self.backward(1),0)/self.bs)
 
 
+
+
+class ContinuousLastLayer:
+	def __init__(self,input_layer,sigma='local'):
+		self.sigma_opt      = sigma
+                self.input_layer    = input_layer
+                input_layer.next_layer = self
+                self.input_shape       = input_layer.output_shape
+                self.bs,self.K  = self.input_shape[0],self.input_shape[1]
+                self.D_in         = self.K
+                self.input_shape_ = (self.bs,self.D_in)#potentially different if flattened
+                self.input        = input_layer.m
+                # PARAMETERS
+                self.sigmas2_= tf.Variable(tf.ones(self.D_in),trainable=False)
+                self.sigmas2 = tf.expand_dims(self.sigmas2_,0)
+                # VI PARAMETERS
+		self.m_      = tf.Variable(tf.random_normal((K,self.bs))*0.1)
+                self.m       = tf.transpose(self.m_)
+                self.p_      = tf.Variable(mysoftmax(tf.random_normal((K,self.bs,R))*0.1,axis=2)) # convenient dimension ordering for fast updates shape: (D^{(\ell)},N,R^{(\ell)})
+                self.p       = tf.transpose(self.p_,[1,0,2])                            # variable for $[p^{(\ell)}_n]_{d,r} of shape (N,D^{(\ell)},R^{(\ell)})$
+                self.v2_     = tf.Variable(tf.ones((K,self.bs)))        # variable holding $[v^{(\ell)}_n]^2_{d}, \forall n,d$
+                self.v2      = tf.transpose(self.v2_,[1,0])
+		# placeholder for update and indices
+                self.k_      = tf.placeholder(tf.int32)                                 # placeholder that will indicate which neuron is being updated
+        def init_thetaq(self):
+                new_p       = tf.assign(self.p_,mysoftmax(tf.ones((self.K,self.bs,self.R)),axis=2))
+                new_v       = tf.assign(self.v2_,tf.ones((self.K,self.bs)))
+                new_m       = tf.assign(self.m_,0*tf.truncated_normal((self.K,self.bs),0,float32(1/sqrt(self.K))))
+                return [new_m,new_p,new_v]
+        def backward(self,flat=1,resi=None):
+		return self.m
+        def backwardk(self,k,resi = None):
+		return self.m[:,k]
+	def sample(self,M=None,sigma=1,deterministic=False):
+		if(M is None): M = tf.random_normal((self.bs,self.D_in))*tf.sqrt(self.sigmas2)
+		return M
+	def likelihood(self):
+                k1  = -tf.reduce_sum(tf.log(self.sigmas2_))*float32(0.5)                            #(1)
+                k2  = -tf.log(2*PI_CONST)*float32(self.D_in*0.5)
+                reconstruction = -tf.einsum('nd,d->',tf.square(self.input-self.m),1/self.sigmas2_)                   #(1)
+                input_v2       = -tf.einsum('dn,d->',self.input_layer.v2_,1/self.sigmas2_)  #(1)
+                m2v2           = -tf.einsum('dn,d->',self.v2_,1/self.sigmas2_)
+                return k1+k2+(m2v2+reconstruction+input_v2)*float32(0.5/self.bs)
+        def KL(self):
+                return self.likelihood()+tf.reduce_sum(tf.log(self.v2_+eps))*float32(0.5/self.bs)+float32(self.D_in/2.0)*tf.log(2*PI_CONST)
+        def update_v2(self):
+		return tf.assign(self.v2_,tf.expand_dims(self.sigmas2_,1)*tf.ones((1,self.bs)))
+	def update_rho(self):
+		return []
+        def update_m(self,ii):
+		return tf.assign(self.m_,tf.transpose(self.input/self.sigmas2))
+        def update_sigma(self):
+		V = tf.reduce_sum(tf.square(self.input-self.m)+self.v2,0)/self.bs
+                if(self.sigma_opt=='local'):
+                    return tf.assign(self.sigmas2_,value)
+		elif(self.sigma_opt=='global'):
+		    return tf.assign(self.sigmas2_,tf.fill([self.D_in],tf.reduce_sum(value)/self.D_in))
+        def update_pi(self):
+		return []
+        def update_Wk(self):
+		return []
+	def update_BV(self):
+		return []
 
 
 

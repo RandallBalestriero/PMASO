@@ -5,7 +5,7 @@ import matplotlib as mpl
 import os
 SAVE_DIR = os.environ['SAVE_DIR']
 
-
+import glob
 
 label_size = 13
 mpl.rcParams['xtick.labelsize'] = label_size+10
@@ -18,35 +18,32 @@ fs=15
 
 
 def doit(per_layer,randomm,mp_opt,leakiness):
-    f=open(SAVE_DIR+'exp_orderEM_'+str(per_layer)+'_'+str(randomm)+'_'+str(mp_opt)+'_'+leakiness+'.pkl')
-    print 'exp_resnet_'+neurons+'_'+layers+'_'+residual+'_'+sigmas
-    LOSSES,reconstruction,x0,samplesclass0,samplesclass1,samples1,params=cPickle.load(f)
-    f.close()
-    for k in [3]:
-	for i in xrange(10):
-            figure(figsize=(2,2))
-            imshow(samplesclass0[k][i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-            xticks([])
-            yticks([])
-            tight_layout()
-            savefig('../BASE_EXP/orderEM/samples0_'+neurons+'_'+layers+'_'+residual+'_'+sigmas+'_'+str(k)+'_'+str(i)+'.png')
-	    close()
-            figure(figsize=(2,2))
-            imshow(samplesclass1[k][i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
-            xticks([])
-            yticks([])
-            tight_layout()
-            savefig('../BASE_EXP/orderEM/samples1_'+neurons+'_'+layers+'_'+residual+'_'+sigmas+'_'+str(k)+'_'+str(i)+'.png')
-	    close()
-    return LOSSES
+    files = glob.glob(SAVE_DIR+'exp_orderEM_'+str(per_layer)+'_'+str(randomm)+'_'+str(mp_opt)+'_'+leakiness+'_run*.pkl')
+    MSEs = []
+    LIKEs = []
+    print files
+    for name in files:
+        f=open(name)
+        LOSSES,reconstruction,x0,samplesclass0,samplesclass1,samples1,params=cPickle.load(f)
+        f.close()
+        LLL = []
+        for k in xrange(1500):
+	    LLL.append(((x0[k]-reconstruction[k])**2).sum())
+	MSEs.append(mean(LLL))
+	LIKEs.append(LOSSES[-1])
+    return MSEs,LIKEs
 
 
-for mp_opt in [0,1,2,3]:
-    for leakiness in ['None',0]:
-	for per_layer in [0,1]:
-	    for randomm in [0,1]:
-		lo=doit(per_layer,randomm,mp_opt,leakiness)
-	        print lo
+for leakiness in ['0','None']:
+    for per_layer in [0,1]:
+        for randomm in [0,1]:
+	    for mp_opt in [0,1,2,3]:
+		try:
+	            MSE,lo=doit(per_layer,randomm,mp_opt,leakiness)
+	            print mean(MSE),std(MSE),mean(lo),std(lo),'\t'
+		except:
+	  	    print 'ERROR'
+	    print '\n'
 
 
 

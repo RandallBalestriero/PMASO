@@ -33,6 +33,8 @@ mp_opt    = int(sys.argv[-2])
 randomm   = int(sys.argv[-3])
 per_layer = int(sys.argv[-4])
 
+runnb     = int(sys.argv[-5])
+
 x_train,y_train,x_test,y_test = load_data(DATASET)
 
 pp = permutation(x_train.shape[0])[:8000]
@@ -65,7 +67,7 @@ samples1=model1.sample(1)[:300]
 
 params = model1.get_params()
 
-f=open(SAVE_DIR+'exp_orderEM_'+str(per_layer)+'_'+str(randomm)+'_'+str(mp_opt)+'_'+sys.argv[-1]+'.pkl','wb')
+f=open(SAVE_DIR+'exp_orderEM_'+str(per_layer)+'_'+str(randomm)+'_'+str(mp_opt)+'_'+sys.argv[-1]+'_run'+str(runnb)+'.pkl','wb')
 cPickle.dump([LOSSES,reconstruction,XX[:1500],samplesclass0,samplesclass1,samples1,params],f)
 f.close()
 
