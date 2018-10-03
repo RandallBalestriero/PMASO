@@ -112,6 +112,7 @@ class model:
 	self.updates_BV      = [l.update_BV() for l in layers[1:]]
         self.updates_m       = [l.update_m(0) for l in layers[1:-1]]
         self.updates_p       = [l.update_m(1) for l in layers[1:-1]]
+        self.updates_rho       = [l.update_m(2) for l in layers[1:-1]]
 	self.updates_v2      = [l.update_v2() for l in layers[1:-1]]
 	self.updates_firstlayer = tf.group(layers[0].update_v2(),layers[0].update_m())
 	self.update_last_p   = layers[-1].update_p() # SEPARATE DEPENDING ON SUP UNSUP TRAINING
@@ -155,11 +156,17 @@ class model:
         else:   iih = self.layers[l+1].m_indices[permutation(len(self.layers[l+1].m_indices))]
 	if(isinstance(self.layers[l+1],layers_.ConvPoolLayer)):
             for i in iih:
-                self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
+                self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
                                                                         self.layers[l+1].j_:int32(i[1]),
                                                                         self.layers[l+1].k_:int32(i[2])})
                 if(fineloss):loss.append(self.session.run(self.KL)) 
-                self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
+            for i in iih:
+                self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
+                                                                        self.layers[l+1].j_:int32(i[1]),
+                                                                        self.layers[l+1].k_:int32(i[2])})
+                if(fineloss):loss.append(self.session.run(self.KL))
+            for i in iih:
+                self.session.run(self.updates_rho[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
                                                                         self.layers[l+1].j_:int32(i[1]),
                                                                         self.layers[l+1].k_:int32(i[2])})
                 if(fineloss):loss.append(self.session.run(self.KL))
@@ -371,7 +378,7 @@ def load_data(DATASET,k=-1):
         x_test  = transpose(x_test,[0,2,3,1])
 	if(k>=0):
 	    x_train = x_train[y_train==k]
-	    y_train = y_train[y_train==k]
+	    y_train = y_train[y_train==k]*0
     elif(DATASET == 'CIFAR100'):
 	batch_size = 100
         TRAIN,TEST = load_cifar100(3)
@@ -434,7 +441,7 @@ def zca_whitening(x, principal_components):
 
 def load_imagenet():
         import scipy.misc
-        classes = glob.glob('../DATASET/tiny-imagenet-200/train/*')
+        classes = glob.glob('../../DATASET/tiny-imagenet-200/train/*')
         x_train,y_train = [],[]
         cpt=0
         for c,name in zip(range(200),classes):
@@ -449,10 +456,10 @@ def load_imagenet():
 
 def load_svhn():
         import scipy.io as sio
-        train_data = sio.loadmat('../DATASET/train_32x32.mat')
+        train_data = sio.loadmat('../../DATASET/train_32x32.mat')
         x_train = train_data['X'].transpose([3,2,0,1]).astype('float32')
         y_train = concatenate(train_data['y']).astype('int32')-1
-        test_data = sio.loadmat('../DATASET/test_32x32.mat')
+        test_data = sio.loadmat('../../DATASET/test_32x32.mat')
         x_test = test_data['X'].transpose([3,2,0,1]).astype('float32')
         y_test = concatenate(test_data['y']).astype('int32')-1
         print y_test
@@ -503,7 +510,7 @@ def load_mnist():
         return [concatenate([data[0][0],data[1][0]]).reshape(60000,1,28,28),concatenate([data[0][1],data[1][1]])],[data[2][0].reshape(10000,1,28,28),data[2][1]]
 
 def load_cifar(channels=1):
-        path = '../DATASET/cifar-10-batches-py/'
+        path = '../../DATASET/cifar-10-batches-py/'
         x_train = []
         y_train = []
         x_test = []
@@ -520,7 +527,7 @@ def load_cifar(channels=1):
 
 
 def load_cifar100(channels=1):
-        path = '../DATASET/cifar-100-python/'
+        path = '../../DATASET/cifar-100-python/'
         PP = unpickle100(path+'train',1,channels)
         x_train = PP[0]
         y_train = PP[1]

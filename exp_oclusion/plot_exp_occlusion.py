@@ -26,39 +26,33 @@ def process(f_name):
 
 
 
-def plot_(loss,reconstruction_loss,reconstruction,x,X,name,K=10):
-    subplot(121)
-    plot(loss)
-    subplot(122)
-    plot(reconstruction_loss)
-    tight_layout()
-    savefig(name+'_loss.png')
-    close()
-    for i in xrange(len(reconstruction)):
-	figure(figsize=(2*K,2))
-	for k in xrange(K):
-	    subplot(3,K,1+k+K*2)
-	    imshow(reconstruction[i][k,:,:,0])
-	    xticks([])
-	    yticks([])
-	    subplot(3,K,1+k+K)
-	    imshow(x[k,:,:,0])
-	    xticks([])
-	    yticks([])
-	    subplot(3,K,1+k)
-	    imshow(x[k,:,:,0])
-	    xticks([])
-	    yticks([])
+def plot_(DATASET,CLASS,MODEL_TYPE,OCLUSION_TYPE,OCLUSION_SPEC,KNOWN_Y):
+    f= open(SAVE_DIR+'exp_oclusion_'+DATASET+'_'+str(CLASS)+'_'+MODEL_TYPE+'_'+OCLUSION_TYPE+'_'+str(OCLUSION_SPEC)+'_'+str(KNOWN_Y)+'.pkl','rb')
+    loss,reconstruction,x,X,Y,preds = cPickle.load(f)
+    f.close()
+    for i in xrange(100):
+	figure(figsize=(2,2))
+        imshow(reconstruction[-1][i,:,:,0],aspect='auto')
+        xticks([])
+        yticks([])
 	tight_layout()
-	savefig(name+'_'+str(i)+'.png')
+	savefig('../BASE_EXP/oclusion/reconstruction_'+DATASET+'_'+str(CLASS)+'_'+MODEL_TYPE+'_'+OCLUSION_TYPE+'_'+str(OCLUSION_SPEC)+'_'+str(KNOWN_Y)+'_'+str(i)+'.png')
 	close()
-	
+        figure(figsize=(2,2))
+        imshow(x[i,:,:,0],aspect='auto')
+        xticks([])
+        yticks([])
+        tight_layout()
+        savefig('../BASE_EXP/oclusion/x_'+DATASET+'_'+str(CLASS)+'_'+MODEL_TYPE+'_'+OCLUSION_TYPE+'_'+str(OCLUSION_SPEC)+'_'+str(KNOWN_Y)+'_'+str(i)+'.png')
+	close()
+        figure(figsize=(2,2))
+        imshow(X[i,:,:,0],aspect='auto')
+        xticks([])
+        yticks([])
+        tight_layout()
+        savefig('../BASE_EXP/oclusion/X_'+DATASET+'_'+str(CLASS)+'_'+MODEL_TYPE+'_'+OCLUSION_TYPE+'_'+str(OCLUSION_SPEC)+'_'+str(KNOWN_Y)+'_'+str(i)+'.png')
+	close()
 
 
-files = glob.glob(SAVE_DIR+'exp_oclusion2_0.1_global_2.pkl')
-for f in files:
-    print f
-    loss,reconstruction_loss,reconstruction,x,X=process(f)
-    plot_(loss,reconstruction_loss,reconstruction,x,X,'./BASE_EXP/occlusion/'+f.split('/')[-1][:-4],10)
 
-
+plot_('MNIST','0','MLP','box','10.0','1')	

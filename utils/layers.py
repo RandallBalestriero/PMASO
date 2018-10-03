@@ -455,11 +455,10 @@ class ConvPoolLayer:
                 a4  = -tf.einsum('nijk,kijn->',mysumpool(a41,[self.Ir,self.Jr]),(tf.square(self.m_)+self.v2_)*self.drop_[:,1])
                 k1  = -tf.reduce_sum(tf.log(self.sigmas2_))/2
                 k2  = tf.einsum('kr,krn->',tf.log(self.pi),tf.reduce_sum(self.p_,[1,2]))/float32(self.bs)
-		k3  = -float32(self.D_in/2.0)*tf.log(2*PI_CONST)/float32(self.bs)
+		k3  = -float32(self.D_in/2.0)*tf.log(2*PI_CONST)
                 return k1+k2+k3+(a1+a2+a3+a4)-self.sparsity_prior*tf.reduce_sum(tf.square(self.W))
         def KL(self):
-                return self.likelihood()+(-tf.reduce_sum(self.p_*tf.log(self.p_))-tf.reduce_sum(self.rho_*tf.log(self.rho_))\
-				+float32(self.D_in/2.0)*tf.log(2*PI_CONST)+float32(0.5)*tf.reduce_sum(tf.log(self.v2_)))/float32(self.bs)
+                return self.likelihood()+(-tf.reduce_sum(self.p_*tf.log(self.p_))-tf.reduce_sum(self.rho_*tf.log(self.rho_))+float32(0.5)*tf.reduce_sum(tf.log(self.v2_)))/float32(self.bs)+float32(self.D_in/2.0)*tf.log(2*PI_CONST)
 	def update_dropout(self):
 		return []
         def update_v2(self):# DONE
@@ -468,38 +467,43 @@ class ConvPoolLayer:
                 a40 = tf.einsum('nijkr,krabc,ijabc,nijk->nijk',self.unpool_R(self.p),tf.square(self.W),1/self.sigmas2_small_patch_,self.rho_tensor) # (N I' J' K)
                 a4  = mysumpool(a40,[self.Ir,self.Jr])*self.drop[1] #( N I J K)
                 return tf.assign(self.v2_,tf.transpose(v_value/(1+a4*v_value),[3,1,2,0]))
-	def update_m(self):
+	def update_m(self,mp_opt=0):
 		reconstruction = (self.input-self.b-self.deconv(None,1,0))/self.sigmas2
 		Wk    = self.W[self.k_]
 		### UPDATE M
-		forward_m   = tf.reduce_sum(self.extract_large_patch(reconstruction*self.deconv(None,-1,0),with_reshape=0),3) #  (N I J ??) -> (N I J)
-                if(isinstance(self.next_layer,ConvPoolLayer)): back = (self.next_layer.deconv()[:,:,:,self.k_]+self.next_layer.b[:,:,:,self.k_])/self.next_layer.sigmas2[:,:,:,self.k_]
-		else:       back = (self.next_layer.backward(0)[:,:,:,self.k_]+self.next_layer.reshape_b[:,:,:,self.k_])/self.next_layer.reshape_sigmas2[:,:,:,self.k_]
-		update_value_m = (forward_m+back)*self.v2[:,:,:,self.k_] # (N I'' J'')
-                new_m = tf.scatter_nd_update(self.m_,self.indices_,tf.transpose(tf.reshape(update_value_m[:,self.i_::self.ratio,self.j_::self.ratio],(self.bs,-1))))
-		new_m_k = new_m[self.k_]
-		### UPDATE P
-#               PROJECTION
-		m_rho = self.unpool(tf.transpose(new_m_k*self.drop_[self.k_,1]*self.mask[self.k_],[2,0,1]),1)[:,:,:,0]*self.rho_tensor[:,:,:,self.k_]# (N I' J')
-		deconv_with2   = tf.map_fn(lambda w:tf.reduce_sum(self.extract_large_patch(self.assemble_small_patch(tf.einsum('nij,abc->nijabc',m_rho,w))*reconstruction,with_reshape=0)[:,self.i_::self.ratio,self.j_::self.ratio],axis=3),Wk,dtype=tf.float32,back_prop=False) # (R N I'' J'')
+		if(mp_opt==0):
+			forward_m   = tf.reduce_sum(self.extract_large_patch(reconstruction*self.deconv(None,-1,0),with_reshape=0),3) #  (N I J ??) -> (N I J)
+	                if(isinstance(self.next_layer,ConvPoolLayer)): back = (self.next_layer.deconv()[:,:,:,self.k_]+self.next_layer.b[:,:,:,self.k_])/self.next_layer.sigmas2[:,:,:,self.k_]
+			else:       back = (self.next_layer.backward(0)[:,:,:,self.k_]+self.next_layer.reshape_b[:,:,:,self.k_])/self.next_layer.reshape_sigmas2[:,:,:,self.k_]
+			update_value_m = (forward_m+back)*self.v2[:,:,:,self.k_] # (N I'' J'')
+	                new_m = tf.scatter_nd_update(self.m_,self.indices_,tf.transpose(tf.reshape(update_value_m[:,self.i_::self.ratio,self.j_::self.ratio],(self.bs,-1))))
+			return new_m
+		elif(mp_opt==1):
+			new_m = self.m_
+			new_m_k = self.m_[self.k_]
+			m_rho = self.unpool(tf.transpose(new_m_k*self.drop_[self.k_,1]*self.mask[self.k_],[2,0,1]),1)[:,:,:,0]*self.rho_tensor[:,:,:,self.k_]# (N I' J')
+			deconv_with2   = tf.map_fn(lambda w:tf.reduce_sum(self.extract_large_patch(self.assemble_small_patch(tf.einsum('nij,abc->nijabc',m_rho,w))*reconstruction,with_reshape=0)[:,self.i_::self.ratio,self.j_::self.ratio],axis=3),Wk,dtype=tf.float32,back_prop=False) # (R N I'' J'')
+	#		M2V2
+	                a40  = tf.einsum('rabc,ijabc,nij->nijr',tf.square(Wk),0.5/self.sigmas2_small_patch_,self.rho_tensor[:,:,:,self.k_]) #(N I' J' R)
+			a4   = tf.einsum('nijr,ijn->rnij',mysumpool(a40,[self.Ir,self.Jr]),tf.square(new_m_k)+self.v2_[self.k_])[:,:,self.i_::self.ratio,self.j_::self.ratio] # (R N I'' J'')
+	                update_value = mysoftmax(deconv_with2-a4+myexpand(tf.log(self.pi[self.k_]),[-1,-1,-1]),axis=0,coeff=eps)# (R N I'' J'')
+	                new_p        = tf.scatter_nd_update(self.p_,self.indices_,tf.transpose(tf.reshape(update_value,(self.R,self.bs,-1)),[2,0,1]))
+			return new_p
+		elif(mp_opt==2):
+			new_m = self.m_
+			new_m_k = self.m_[self.k_]
+			new_p = self.p_
+			new_p_k = new_p[self.k_]
+	                mp_reverted = self.unpool(tf.einsum('ijn,ijrn->nijr',self.drop_[self.k_,1]*new_m_k,new_p_k),self.R) # (N I' J' R)
+			proj2       = tf.einsum('nijr,rabc,nijabc->nij',mp_reverted,Wk,self.extract_small_patch(reconstruction)) # (N I' J')
 #		M2V2
-                a40  = tf.einsum('rabc,ijabc,nij->nijr',tf.square(Wk),0.5/self.sigmas2_small_patch_,self.rho_tensor[:,:,:,self.k_]) #(N I' J' R)
-		a4   = tf.einsum('nijr,ijn->rnij',mysumpool(a40,[self.Ir,self.Jr]),tf.square(new_m_k)+self.v2_[self.k_])[:,:,self.i_::self.ratio,self.j_::self.ratio] # (R N I'' J'')
-                update_value = mysoftmax(deconv_with2-a4+myexpand(tf.log(self.pi[self.k_]),[-1,-1,-1]),axis=0,coeff=eps)# (R N I'' J'')
-                new_p        = tf.scatter_nd_update(self.p_,self.indices_,tf.transpose(tf.reshape(update_value,(self.R,self.bs,-1)),[2,0,1]))
-		new_p_k = new_p[self.k_]
-		### UPDATE RHO
-#               PROJECTION
-                mp_reverted = self.unpool(tf.einsum('ijn,ijrn->nijr',self.drop_[self.k_,1]*new_m_k,new_p_k),self.R) # (N I' J' R)
-		proj2       = tf.einsum('nijr,rabc,nijabc->nij',mp_reverted,Wk,self.extract_small_patch(reconstruction)) # (N I' J')
-#		M2V2
-		a43 = tf.einsum('ijn,ijrn->nijr',self.drop_[self.k_,1]*(tf.square(new_m_k)+self.v2_[self.k_]),new_p_k) # (N I J R)
-                a44 = tf.einsum('nijr,rabc,ijabc->nij',self.unpool(a43,self.R),tf.square(self.W[self.k_]),0.5/self.sigmas2_small_patch_) # (N I' J')
-                V   = tf.reshape(tf.extract_image_patches(tf.expand_dims(proj2-a44,-1),(1,self.Ir,self.Jr,1),(1,self.Ir,self.Jr,1),(1,1,1,1),"VALID"),
+			a43 = tf.einsum('ijn,ijrn->nijr',self.drop_[self.k_,1]*(tf.square(new_m_k)+self.v2_[self.k_]),new_p_k) # (N I J R)
+	                a44 = tf.einsum('nijr,rabc,ijabc->nij',self.unpool(a43,self.R),tf.square(self.W[self.k_]),0.5/self.sigmas2_small_patch_) # (N I' J')
+	                V   = tf.reshape(tf.extract_image_patches(tf.expand_dims(proj2-a44,-1),(1,self.Ir,self.Jr,1),(1,self.Ir,self.Jr,1),(1,1,1,1),"VALID"),
                                                                 (self.bs,self.I,self.J,self.Ir,self.Jr)) # (N I J Ir Jr)
-                update_value_rho = mysoftmax(V[:,self.i_::self.ratio,self.j_::self.ratio],axis=[3,4],coeff=eps)# (N I'' J'' Ir Jr)
-                new_rho = tf.scatter_nd_update(self.rho_,self.indices_,tf.transpose(tf.reshape(tf.transpose(update_value_rho,[3,4,0,1,2]),(self.Ir,self.Jr,self.bs,-1)),[3,0,1,2]))
-		return tf.group(new_m,new_p,new_rho)
+	                update_value_rho = mysoftmax(V[:,self.i_::self.ratio,self.j_::self.ratio],axis=[3,4],coeff=eps)# (N I'' J'' Ir Jr)
+	                new_rho = tf.scatter_nd_update(self.rho_,self.indices_,tf.transpose(tf.reshape(tf.transpose(update_value_rho,[3,4,0,1,2]),(self.Ir,self.Jr,self.bs,-1)),[3,0,1,2]))
+			return new_rho
         def update_Wk(self):
 #		return []
 		i = self.i_
