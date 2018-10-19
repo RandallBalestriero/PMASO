@@ -53,13 +53,13 @@ else:
 
 LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(0.0000,'linear'),CPT=200,random=0,fineloss=0,verbose=0,mp_opt=0,per_layer=1)
 reconstruction=model1.reconstruct()[:1500]
-samplesclass0=[model1.sampleclass(0,k)[:150] for k in xrange(neuronsss)]
-samplesclass1=[model1.sampleclass(1,k)[:150] for k in xrange(neuronsss)]
+samplesclass0=[model1.sampleclass(0,k)[:150] for k in xrange(10)]
+samplesclass1=[model1.sampleclass(1,k)[:150] for k in xrange(10)]
 samples1=model1.sample(1)[:300]
 params = model1.get_params()
 
 f=open(SAVE_DIR+'exp_nonlinearity_'+DATASET+'_'+sigmass+'_'+sys.argv[-1]+'_run'+str(runnb)+'.pkl','wb')
-cPickle.dump([LOSSES,reconstruction,XX[:150],samplesclass0,samplesclass1,samples1,params],f)
+cPickle.dump([LOSSES,reconstruction,XX[:1500],samplesclass0,samplesclass1,samples1,params],f)
 f.close()
 
 

@@ -21,8 +21,6 @@ def normalize(x):
 
 DATASET = sys.argv[-2]
 
-if(DATASET=='CIFAR'): neuronsss=1
-else: neuronsss=10
 
 sigmass='local'
 
@@ -66,8 +64,8 @@ LOSSES = []
 for i in xrange(10):
     LOSSES.append(train_layer_model(model1,rcoeff_schedule=schedule(0.00000,'linear'),CPT=20,random=0,fineloss=0,verbose=0,per_layer=1,mp_opt=0))
     reconstruction = model1.reconstruct()[:150]
-    samplesclass0 = [model1.sampleclass(0,k)[:150] for k in xrange(neuronsss)]
-    samplesclass1 = [model1.sampleclass(1,k)[:150] for k in xrange(neuronsss)]
+    samplesclass0 = [model1.sampleclass(0,k)[:150] for k in xrange(CCC)]
+    samplesclass1 = [model1.sampleclass(1,k)[:150] for k in xrange(CCC)]
     params=model1.get_params()
     f=open(SAVE_DIR+'exp_cnn_'+DATASET.lower()+'_'+str(classs)+'.pkl','wb')
     cPickle.dump([LOSSES,reconstruction,XX[:150],samplesclass0,samplesclass1,params],f)

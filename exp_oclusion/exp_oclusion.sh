@@ -5,16 +5,16 @@
 
 # DATASET CLASS MODEL OCLUSIONTYPE OCLUSIONSPEC KNOWNY
 
-python exp_oclusion.py MNIST 0 $1 $2 $3 0
+#python exp_oclusion.py MNIST 0 $1 $2 $3 0
 #python exp_oclusion.py MNIST 0 $1 $2 $3 1
 
-python exp_oclusion.py CIFAR 0 $1 $2 $3 0
-python exp_oclusion.py CIFAR 2 $1 $2 $3 0
-python exp_oclusion.py CIFAR 4 $1 $2 $3 0
+python exp_oclusion.py CIFAR $1 $2 $3 $4 0
+#python exp_oclusion.py CIFAR 2 $1 $2 $3 0
+#python exp_oclusion.py CIFAR 4 $1 $2 $3 0
 
-python exp_oclusion.py CIFAR 0 $1 $2 $3 1
-python exp_oclusion.py CIFAR 2 $1 $2 $3 1
-python exp_oclusion.py CIFAR 4 $1 $2 $3 1
+#python exp_oclusion.py CIFAR 0 $1 $2 $3 1
+#python exp_oclusion.py CIFAR 2 $1 $2 $3 1
+#python exp_oclusion.py CIFAR 4 $1 $2 $3 1
 
 
 

@@ -16,11 +16,18 @@ SAVE_DIR = os.environ['SAVE_DIR']
 
 
 def doit(DATASET,sigmass,leakiness,plot=1):
-    f=open(SAVE_DIR+'exp_nonlinearity_'+DATASET+'_'+sigmass+'_'+leakiness+'.pkl','rb')
-    LOSSES0,reconstruction0,x0,samplesclass00,samplesclass10,samples10,W0,sigmas0=cPickle.load(f)
-    print LOSSES0
-    f.close()
-    LL = []
+    files = glob.glob(SAVE_DIR+'exp_nonlinearity_'+DATASET+'_'+sigmass+'_'+leakiness+'_run*.pkl')
+    LOSSES = []
+    for filename in files:
+        f=open(filename,'rb')
+        LOSSES0,reconstruction,x0,samplesclass00,samplesclass10,samples10,params=cPickle.load(f)
+        f.close()
+        LL = []
+        LOSSES.append(LOSSES0[-1])
+        for i in xrange(len(x0)):
+            LL.append(((reconstruction[i]-x0[i])**2).sum())
+    return mean(LL),mean(LOSSES),std(LOSSES)
+
     if(plot==0):return LOSSES0
     for i in xrange(15):
 	figure(figsize=(2,2))
@@ -62,7 +69,9 @@ def doit(DATASET,sigmass,leakiness,plot=1):
 #l1=doit('MNIST','global','None',1)
 
 #l1=doit('flippedMNIST','global','-1',1)
-l1=doit('MNIST','global','0',1)
+for sig in ['local','global']:
+    for leak in ['-1','0','0.01','None']:
+        print doit('flippedMNIST',sig,leak,0)
 #l1=doit('flippedMNIST','global','0.01',1)
 #l1=doit('flippedMNIST','global','None',1)
 
