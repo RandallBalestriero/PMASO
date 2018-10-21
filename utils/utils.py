@@ -83,16 +83,78 @@ def sampletrue(layers):
         return layers[1].sample(0,deterministic=True)
 
 
-def SSE(x,y):
-    return tf.reduce_sum(tf.square(x-y))
-	
+class latent_variable_placeholder:
+    def __init__(self,m=0,p=0,v2=0):
+        self.m=m
+        self.v2=v2
+        self.p=p
 		
-def init_latent_variables(layers,N):
+def init_latent_variables(X,X_V2,X_MASK,Y,Y_V2,Y_MASK,layers):
     #m p v
+    N = X.shape[0]
     P = dict()
     for l in layers:
         if(isinstance(l,layers_.DenseLayer)):
-            P[l]=[(randn(l.K,N)*0.).astype('float32'),(ones((l.K,N,l.R))/l.R).astype('float32'),ones((l.K,N),dtype='float32')]
+            P[l]=latent_variable_placeholder((randn(N,l.K)*0.01).astype('float32'),(ones((N,l.K,l.R))/l.R).astype('float32'),ones((N,l.K),dtype='float32'))
+            # placeholders
+            P[l].m_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K])
+            P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.R])
+            P[l].v2_placeholder = tf.placeholder(tf.float32,shape=[l.bs,l.K])
+            # assign operators
+            P[l].m_assign_op    = tf.assign(l.m_,tf.transpose(P[l].m_placeholder))
+            P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,0,2]))
+            P[l].v2_assign_op   = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder))
+        elif(isinstance(l,layers_.ConvLayer)):
+            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*0.01).astype('float32'),(ones((N,l.K,l.I,l.J,l.R))/l.R).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32'))
+            # placeholders
+            P[l].m_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
+            P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J,l.R])
+            P[l].v2_placeholder = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
+            # assign operators
+            P[l].m_assign_op    = tf.assign(l.m_,tf.transpose(P[l].m_placeholder,[1,2,3,0]))
+            P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,2,3,4,0]))
+            P[l].v2_assign_op   = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder,[1,2,3,0]))
+        elif(isinstance(l,layers_.PoolLayer)):
+            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*0.01).astype('float32'),(ones((N,l.K,l.I,l.J,l.R))/l.R).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32'))
+            # placeholders
+            P[l].m_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
+            P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J,l.R])
+            P[l].v2_placeholder = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
+            # assign operators
+            P[l].m_assign_op    = tf.assign(l.m_,tf.transpose(P[l].m_placeholder,[1,2,3,0]))
+            P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,2,3,4,0]))
+            P[l].v2_assign_op   = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder,[1,2,3,0]))
+        elif(isinstance(l,layers_.InputLayer)):
+            P[l]      = latent_variable_placeholder(X,0,X_V2)
+            P[l].mask = X_MASK
+            # placeholders
+            P[l].m_placeholder    = tf.placeholder(tf.float32,shape=l.output_shape)
+            P[l].v2_placeholder   = tf.placeholder(tf.float32,shape=l.output_shape)
+            P[l].mask_placeholder = tf.placeholder(tf.float32,shape=l.output_shape)
+            # assign operators
+            P[l].m_assign_op      = tf.assign(l.m,P[l].m_placeholder)
+            P[l].mask_assign_op   = tf.assign(l.mask,P[l].mask_placeholder)
+            P[l].v2_assign_op     = tf.assign(l.v2,P[l].v2_placeholder)
+        elif(isinstance(l,layers_.CategoricalLastLayer)):
+            P[l]      = latent_variable_placeholder(0,Y,0)
+            P[l].mask = Y_MASK
+            # placeholders
+            P[l].p_placeholder    = tf.placeholder(tf.float32,shape=[l.bs,l.R])
+            P[l].mask_placeholder = tf.placeholder(tf.float32,shape=[l.bs])
+            # assign operators
+            P[l].p_assign_op      = tf.assign(l.p_,P[l].p_placeholder)
+            P[l].mask_assign_op   = tf.assign(l.mask,P[l].mask_placeholder)
+        elif(isinstance(l,layers_.ContinuousLastLayer)):
+            P[l]      = latent_variable_placeholder(Y,0,Y_V2)
+            P[l].mask = Y_MASK
+            # placeholders
+            P[l].m_placeholder    = tf.placeholder(tf.float32,shape=[l.bs,l.K])
+            P[l].v2_placeholder   = tf.placeholder(tf.float32,shape=[l.bs,l.K])
+            P[l].mask_placeholder = tf.placeholder(tf.float32,shape=[l.bs])
+            # assign operators
+            P[l].m_assign_op      = tf.assign(l.m_,tf.transpose(P[l].m_placeholder))
+            P[l].v2_assign_op     = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder))
+            P[l].mask_assign_op   = tf.assign(l.mask,P[l].mask_placeholder)
     return P
 
 
@@ -124,46 +186,26 @@ class model:
         self.bs        = layers[1].bs
         self.L         = len(layers)
         #
-        self.x         = tf.placeholder(tf.float32,shape=layers[0].input_shape)
-        self.y         = tf.placeholder(tf.float32,shape=[layers[0].input_shape[0],layers[-1].R]) # MIGHT NOT BE USED DEPENDING ON SETTING
-        self.x_mask    = tf.placeholder(tf.float32,shape=layers[0].input_shape)
-        self.y_mask    = tf.placeholder(tf.float32,shape=[layers[0].input_shape[0]])
-        self.X          = X
         if(Y is None):
-            if(isinstance(layers[-1],layers_.ContinuousLastLayer)): self.Y = zeros((X.shape[0],layers[-1].K),dtype='float32')
-            else: self.Y = ones((X.shape[0],layers[-1].R),dtype='float32')/layers[-1].R
-            self.Y_mask = ones(X.shape[0],dtype='float32')
+            if(isinstance(layers[-1],layers_.ContinuousLastLayer)): 
+                Y = zeros((X.shape[0],layers[-1].K),dtype='float32')
+            else: 
+                Y = ones((X.shape[0],layers[-1].R),dtype='float32')/layers[-1].R
+            Y_mask = ones(X.shape[0],dtype='float32')
         else:
-            self.Y = Y
-            if(Y_mask is None): self.Y_mask = zeros(X.shape[0],dtype='float32')
-            else:               self.Y_mask = Y_mask
-        if(X_mask is None): self.X_mask = zeros_like(X,dtype='float32')
-        else:               self.X_mask = X_mask
-        self.initx              = tf.assign(self.layers[0].m,self.x)
-        if(isinstance(layers[-1],layers_.ContinuousLastLayer)):
-            self.inity  = tf.assign(self.layers[-1].m_,self.y)
-        else:self.inity = tf.assign(self.layers[-1].p_,self.y)
-        self.initx_mask = tf.assign(self.layers[0].mask,self.x_mask)
-        self.inity_mask = tf.assign(self.layers[-1].mask,self.y_mask)
+            if(Y_mask is None): 
+                Y_mask = zeros(X.shape[0],dtype='float32')
+            else:               
+                Y_mask = Y_mask
+        if(X_mask is None): 
+            X_mask = zeros_like(X,dtype='float32')
+        else:               
+            X_mask = X_mask
+        self.layers_ = init_latent_variables(X,ones_like(X)*X_mask,X_mask,Y,ones_like(Y)*Y_mask.reshape((-1,1)),Y_mask,layers)
         #
         self.alpha     = tf.placeholder(tf.float32)
-        self.m_        = dict()
-        self.p_        = dict()
-        self.v2_       = dict()
-        self.initm_    = dict()
-        self.initp_    = dict()
-        self.initv2_   = dict()
-        self.initalpha = []
         for l in layers:
-            if(isinstance(l,layers_.DenseLayer)): 
-                self.m_[l]  = tf.placeholder(tf.float32,shape=[l.K,l.bs])
-                self.p_[l]  = tf.placeholder(tf.float32,shape=[l.K,l.bs,l.R])
-                self.v2_[l] = tf.placeholder(tf.float32,shape=[l.K,l.bs])
-                self.initm_[l]  = tf.assign(l.m_,self.m_[l])
-                self.initp_[l]  = tf.assign(l.p_,self.p_[l])
-                self.initv2_[l] = tf.assign(l.v2_,self.v2_[l])
-                self.initalpha.append(tf.assign(l.alpha,self.alpha))
-        self.latent_variables = init_latent_variables(layers,self.N)
+                self.layers_[l].alpha_assign_op=tf.assign(l.alpha,self.alpha)
         self.sigma     = tf.placeholder(tf.float32)
         # INIT SESSION
         session_config = tf.ConfigProto(allow_soft_placement=False,log_device_placement=True)
@@ -172,7 +214,6 @@ class model:
         init           = tf.global_variables_initializer()
         session.run(init)
         self.session=session
-        self.initop_thetaq      = [l.init_thetaq() for l in layers]
         ### WEIGHTS UPDATES OP
         self.updates_S       = [l.update_S() for l in layers[1:]]
 	self.updates_BV      = [l.update_BV() for l in layers[1:]]
@@ -195,31 +236,40 @@ class model:
             self.samplesclass    = [sampleclass(layers,k,sigma=self.sigma) for k in xrange(layers[-1].R)]
         self.samples         = sample(layers,sigma=self.sigma)
         self.samplet         = sampletrue(layers)
+    def set_alpha(self,alpha):
+        for l in self.layers:
+            self.session.run(self.layers_[l].alpha_assign_op,feed_dict={self.alpha:alpha})
     def set_batch(self):
-        # input-output
-        self.session.run(self.initx,feed_dict={self.x:self.X[self.indices]})
-        self.session.run(self.inity,feed_dict={self.y:self.Y[self.indices]})
-        # masks
-        self.session.run(self.initx_mask,feed_dict={self.x_mask:self.X_mask[self.indices]})
-        self.session.run(self.inity_mask,feed_dict={self.y_mask:self.Y_mask[self.indices]})
-        #latent variables
         for l in self.layers:
-            if(isinstance(l,layers_.DenseLayer)):
-                self.session.run(self.initm_[l],feed_dict={self.m_[l]:self.latent_variables[l][0][:,self.indices]})
-                self.session.run(self.initp_[l],feed_dict={self.p_[l]:self.latent_variables[l][1][:,self.indices]})
-                self.session.run(self.initv2_[l],feed_dict={self.v2_[l]:self.latent_variables[l][2][:,self.indices]})
+            if(isinstance(l,layers_.InputLayer) or isinstance(l,layers_.ContinuousLastLayer)):
+                self.session.run(self.layers_[l].m_assign_op,feed_dict={self.layers_[l].m_placeholder:self.layers_[l].m[self.indices]})
+                self.session.run(self.layers_[l].v2_assign_op,feed_dict={self.layers_[l].v2_placeholder:self.layers_[l].v2[self.indices]})
+                self.session.run(self.layers_[l].mask_assign_op,feed_dict={self.layers_[l].mask_placeholder:self.layers_[l].mask[self.indices]})
+            elif(isinstance(l,layers_.CategoricalLastLayer)):
+                self.session.run(self.layers_[l].p_assign_op,feed_dict={self.layers_[l].p_placeholder:self.layers_[l].p[self.indices]})
+                self.session.run(self.layers_[l].mask_assign_op,feed_dict={self.layers_[l].mask_placeholder:self.layers_[l].mask[self.indices]})
+            else:
+                self.session.run(self.layers_[l].m_assign_op,feed_dict={self.layers_[l].m_placeholder:self.layers_[l].m[self.indices]})
+                self.session.run(self.layers_[l].p_assign_op,feed_dict={self.layers_[l].p_placeholder:self.layers_[l].p[self.indices]})
+                self.session.run(self.layers_[l].v2_assign_op,feed_dict={self.layers_[l].v2_placeholder:self.layers_[l].v2[self.indices]})
     def save_batch(self):
-        #input-output
-        self.X[self.indices]=self.session.run(self.layers[0].m)
-        if(isinstance(self.layers[-1],layers_.ContinuousLastLayer)):
-            self.Y[self.indices]=self.session.run(self.layers[-1].m)
-        else: self.Y[self.indices]=self.session.run(self.layers[-1].p_)
-        #latent variables
         for l in self.layers:
             if(isinstance(l,layers_.DenseLayer)):
-                self.latent_variables[l][0][:,self.indices]=self.session.run(l.m_)
-                self.latent_variables[l][1][:,self.indices]=self.session.run(l.p_)
-                self.latent_variables[l][2][:,self.indices]=self.session.run(l.v2_)
+                self.layers_[l].m[self.indices]  = transpose(self.session.run(l.m_))
+                self.layers_[l].p[self.indices]  = transpose(self.session.run(l.p_),[1,0,2])
+                self.layers_[l].v2[self.indices] = transpose(self.session.run(l.v2_))
+            elif(isinstance(l,layers_.InputLayer)):
+                self.layers_[l].m[self.indices]  = self.session.run(l.m)
+                self.layers_[l].v2[self.indices] = self.session.run(l.v2)
+            elif(isinstance(l,layers_.CategoricalLastLayer)):
+                self.layers_[l].p[self.indices]  = self.session.run(l.p_)
+            elif(isinstance(l,layers_.ContinuousLastLayer)):
+                self.layers_[l].m[self.indices]  = transpose(self.session.run(l.m_))
+                self.layers_[l].v2[self.indices] = transpose(self.session.run(l.v2_))
+            else:
+                self.layers_[l].m[self.indices]  = transpose(self.session.run(l.m_),[3,0,1,2])
+                self.layers_[l].p[self.indices]  = transpose(self.session.run(l.p_),[4,0,1,2,3])
+                self.layers_[l].v2[self.indices] = transpose(self.session.run(l.v2_),[3,0,1,2])
     def get_sigmas(self):
 	return self.session.run([l.sigmas2_ for l in self.layers[1:]])
     def get_Ws(self):
@@ -233,7 +283,7 @@ class model:
     def get_params(self):
         params = []
         for l in self.layers[1:]:
-            if(isinstance(l,layers_.ConvPoolLayer) or isinstance(l,layers_.FinalLayer)):
+            if(isinstance(l,layers_.ConvPoolLayer) or isinstance(l,layers_.CategoricalLastLayer)):
                 params.append([self.session.run(l.W),self.session.run(l.sigmas2_),self.session.run(l.pi),self.session.run(l.b_)])
             else:
                 params.append([self.session.run(l.W),self.session.run(l.sigmas2_),self.session.run(l.pi),self.session.run(l.b_),self.session.run(l.V_)])
@@ -247,23 +297,30 @@ class model:
         if(verbose): print 'V2',l,self.session.run(self.KL),self.session.run(self.like0)
         if(random==0): iih = self.layers[l+1].m_indices
         else:   iih = self.layers[l+1].m_indices[permutation(len(self.layers[l+1].m_indices))]
-	if(isinstance(self.layers[l+1],layers_.ConvPoolLayer)):
+	if(isinstance(self.layers[l+1],layers_.ConvLayer)):
             for i in iih:
                 self.session.run(self.updates_m[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
                                                                         self.layers[l+1].j_:int32(i[1]),
                                                                         self.layers[l+1].k_:int32(i[2])})
                 if(fineloss):loss.append(self.session.run(self.KL)) 
+                if(verbose==2): print 'M',l,self.session.run(self.KL)
             for i in iih:
                 self.session.run(self.updates_p[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
                                                                         self.layers[l+1].j_:int32(i[1]),
                                                                         self.layers[l+1].k_:int32(i[2])})
                 if(fineloss):loss.append(self.session.run(self.KL))
-            for i in iih:
-                self.session.run(self.updates_rho[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
-                                                                        self.layers[l+1].j_:int32(i[1]),
-                                                                        self.layers[l+1].k_:int32(i[2])})
-                if(fineloss):loss.append(self.session.run(self.KL))
-            if(verbose): print 'P',l,self.session.run(self.KL)
+                if(verbose==2): print 'P',l,self.session.run(self.KL)
+#            for i in iih:
+#                self.session.run(self.updates_rho[l],feed_dict={self.layers[l+1].i_:int32(i[0]),
+#                                                                        self.layers[l+1].j_:int32(i[1]),
+#                                                                        self.layers[l+1].k_:int32(i[2])})
+#                if(fineloss):loss.append(self.session.run(self.KL))
+            if(verbose==1): print 'P',l,self.session.run(self.KL)
+        elif(isinstance(self.layers[l+1],layers_.PoolLayer)):
+            self.session.run(self.updates_m[l])
+            if(verbose==1): print 'M',l,self.session.run(self.KL)
+            self.session.run(self.updates_p[l])
+            if(verbose==1): print 'P',l,self.session.run(self.KL)
 	elif(isinstance(self.layers[l+1],layers_.DenseLayer)):
 	    if(verbose): print 'BEFORE M',l,self.session.run(self.KL),self.session.run(self.like0)
 	    if(mp_opt==0):
@@ -303,7 +360,6 @@ class model:
         loss = []
 	l    = lay
 	GAIN = self.session.run(self.like1)
-	if(verbose): print 'BEFORE M ',str(l),GAIN
         self.session.run(self.updates_sigma[l])
         if(verbose): print 'SIGMA ',str(l),self.session.run(self.like1)
         self.session.run(self.updates_BV[l])
@@ -315,18 +371,20 @@ class model:
                 self.session.run(self.updates_Wk[l],feed_dict={self.layers[l+1].k_:int32(kk)})
                 if(fineloss): loss.append(self.session.run(self.like1))
 	    if(verbose): print 'DW',l,self.session.run(self.like1)
-        elif(isinstance(self.layers[l+1],layers_.ConvPoolLayer)):
+        elif(isinstance(self.layers[l+1],layers_.ConvLayer)):
             for kk in iih:
-                self.session.run(self.updates_Wk[l],feed_dict={self.layers[l+1].r_:int32(kk[1]),
-								self.layers[l+1].k_:int32(kk[0]),
-								self.layers[l+1].i_:int32(kk[2]),
-								self.layers[l+1].j_:int32(kk[3])})
+                self.session.run(self.updates_Wk[l],feed_dict={	self.layers[l+1].k_:int32(kk[0]),
+								self.layers[l+1].i_:int32(kk[1]),
+								self.layers[l+1].j_:int32(kk[2])})
                 if(fineloss):loss.append(self.session.run(self.like1))
-	    if(verbose): print 'CW',l,self.session.run(self.like1),
+                if(verbose==2): print 'CW',l,self.session.run(self.like1)
+	    if(verbose==1): print 'CW',l,self.session.run(self.like1)
+        elif(isinstance(self.layers[l+1],layers_.PoolLayer)):
+            1
         else:# LAST LAYER
             self.session.run(self.updates_Wk[-1])
             if(fineloss): loss.append(self.session.run(self.like1))
-	    if(verbose): print 'LW',l,self.session.run(self.like1),
+	    if(verbose): print 'LW',l,self.session.run(self.like1)
         self.session.run(self.updates_pi[l])
 	if(verbose): print 'PI',l,self.session.run(self.like1)
         if(fineloss): loss.append(self.session.run(self.like1)) 
@@ -364,8 +422,6 @@ class model:
                 g+=g_
 	    GAINS+=g
         return GAINS
-    def set_alpha(self,alpha):
-        self.session.run(self.initalpha,feed_dict={self.alpha:alpha})
     def init_dataset(self,x,y=None):
         """this function initializes the variable of the
         first layer with x and possibly the last layer
