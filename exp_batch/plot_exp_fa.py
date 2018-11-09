@@ -10,6 +10,11 @@ SAVE_DIR = os.environ['SAVE_DIR']
 
 
 
+
+def normalize(x):
+    return (x-x.min())/(x.max()-x.min())
+
+
 label_size = 13
 mpl.rcParams['xtick.labelsize'] = label_size+10
 mpl.rcParams['ytick.labelsize'] = label_size
@@ -31,7 +36,7 @@ def plotclasses(classes,samplesclass1):
 
 
 def doit(MODEL,NEURONS,pl=1):
-    f=open(SAVE_DIR+'exp_batch_1000_1000_'+MODEL+'_'+NEURONS+'.pkl','rb')
+    f=open(SAVE_DIR+'exp_batch_5000_500_'+MODEL+'_'+NEURONS+'.pkl','rb')
     LOSSES,reconstruction,x,y,samples0,samples1=cPickle.load(f)
     f.close()
     LLL = []
@@ -39,23 +44,23 @@ def doit(MODEL,NEURONS,pl=1):
         LLL.append(((reconstruction[i]-x[i])**2).sum())
     MSE = mean(LLL)
     if(pl==0): return  MSE,squeeze(LOSSES)
-    for i in xrange(10):
+    for i in xrange(30):
         figure(figsize=(2,2))
-        imshow(x[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
+        imshow(normalize(x[i]),aspect='auto',interpolation='nearest')
         xticks([])
         yticks([])
         tight_layout()
         savefig('../BASE_EXP/BATCH/sigmass'+'_'+MODEL+'_'+NEURONS+'_x_'+str(i)+'.png')
         close()
         figure(figsize=(2,2))
-        imshow(reconstruction[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
+        imshow(normalize(reconstruction[i]),aspect='auto',interpolation='nearest')
         xticks([])
         yticks([])
         tight_layout()
         savefig('../BASE_EXP/BATCH/sigmass'+'_'+MODEL+'_'+NEURONS+'_reconstruction_'+str(i)+'.png')
         close()
         figure(figsize=(2,2))
-        imshow(samples0[i,:,:,0],aspect='auto',cmap='Greys',interpolation='nearest')
+        imshow(normalize(samples0[i]),aspect='auto',interpolation='nearest')
         xticks([])
         yticks([])
         tight_layout()
