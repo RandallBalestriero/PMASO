@@ -5,14 +5,47 @@ import layers as layers_
 import itertools
 from random import shuffle
 import zipfile
-
+from sklearn.decomposition import PCA
+from sklearn.feature_extraction.image import extract_patches_2d
 def mynormalize(x):
     return (x-x.min())/(x.max()-x.min())
 
 
+def collect_sigmas(layers):
+    a=[]
+    cpt=0
+    for l in layers[1:]:
+        a.append(tf.reduce_sum(l.update_sigma(True)))
+        cpt+=prod(l.input_shape[1:])
+    S=tf.add_n(a)/cpt
+    a=[[]]
+    for l in layers[1:]:
+        a.append(tf.assign(l.sigmas2_,tf.ones_like(l.sigmas2_)*S))
+    return a
+
 def softmax(x,axis=-1):
     m=x.max(axis=axis,keepdims=True)
     return exp(x-m)/exp(x-m).sum(axis=axis,keepdims=True)
+
+
+
+def PCA(X,K,opt=False):
+    mu = X.mean(0)
+    if(opt==False):
+        p = permutation(X.shape[0])[:K]
+        return X[p]/norm(X[p],2,1,keepdims=True),mu#/norm(X[p].reshape((K,-1)),2,axis=1,keepdims=True)
+    Xm  = X-mu.reshape((1,-1))
+    v,w = eigh(dot(Xm.T,Xm))
+    w   = w[:,-K:]
+#    print v/v.sum()
+    return w.T*mean(norm(X,2,axis=1)),mu
+
+def extract_patches(M,S):
+    N,_,_,C = M.shape
+    PATCHES = []
+    for n in xrange(N):
+        PATCHES.append(stack([extract_patches_2d(M[n,:,:,c],(S,S)) for c in xrange(C)],2))
+    return asarray(PATCHES).reshape((-1,S*S*C))
 
 
 def plot_layer(model,l,n_,filters=1):
@@ -146,7 +179,7 @@ def init_latent_variables(X,X_V2,X_MASK,Y,Y_V2,Y_MASK,layers):
     P = dict()
     for l in layers:
         if(isinstance(l,layers_.DenseLayer)):
-            P[l]=latent_variable_placeholder((randn(N,l.K)*1).astype('float32'),softmax(randn(N,l.K,l.R),-1).astype('float32'),ones((N,l.K),dtype='float32'))
+            P[l]=latent_variable_placeholder((randn(N,l.K)*1).astype('float32'),softmax(randn(N,l.K,l.R)*0.01,-1).astype('float32'),ones((N,l.K),dtype='float32')/prod(l.input_shape[1:]))
             # placeholders
             P[l].m_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K])
             P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.R])
@@ -156,7 +189,7 @@ def init_latent_variables(X,X_V2,X_MASK,Y,Y_V2,Y_MASK,layers):
             P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,0,2]))
             P[l].v2_assign_op   = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder))
         elif(isinstance(l,layers_.ConvLayer)):
-            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*1).astype('float32'),softmax(randn(N,l.K,l.I,l.J,l.R),-1).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32'))
+            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*1).astype('float32'),softmax(randn(N,l.K,l.I,l.J,l.R)*0.01,-1).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32')/(l.Ic*l.Jc*l.C))
             # placeholders
             P[l].m_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
             P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J,l.R])
@@ -196,7 +229,7 @@ def init_latent_variables(X,X_V2,X_MASK,Y,Y_V2,Y_MASK,layers):
             P[l].p_assign_op      = tf.assign(l.p_,P[l].p_placeholder)
             P[l].mask_assign_op   = tf.assign(l.mask,P[l].mask_placeholder)
         elif(isinstance(l,layers_.ContinuousLastLayer)):
-            P[l]      = latent_variable_placeholder(Y,0,ones((l.K,),dtype='float32'))
+            P[l]      = latent_variable_placeholder(Y,0,ones((l.K,),dtype='float32')/prod(l.input_shape[1:]))
 #            P[l].mask = Y_MASK
             # placeholders
             P[l].m_placeholder    = tf.placeholder(tf.float32,shape=[l.bs,l.K])
@@ -219,7 +252,7 @@ def likelihood(layers,batch):
     likes = []
     for l in xrange(len(layers)):
         likes.append(tf.reduce_sum(like[:l])+layers[l].likelihood(batch,True))
-    return likes,tf.reduce_sum(like)
+    return likes,tf.add_n(like)
 	
 
 def KL(layers):
@@ -229,9 +262,9 @@ def KL(layers):
     for l in layers:
         kl.append(l.KL())
     kls = []
-    for l in xrange(len(layers)):
-        kls.append(tf.reduce_sum(kl[:l])+layers[l].KL(True))
-    return kls,tf.reduce_sum(kl)
+#    for l in xrange(len(layers)):
+#        kls.append(tf.reduce_sum(kl[:l])+layers[l].KL(True))
+    return kls,tf.add_n(kl)
 
 
 
@@ -276,7 +309,7 @@ class model:
             self.updates_p       = [l.update_p() for l in layers]
 	    self.updates_v2      = [l.update_v2() for l in layers]
             self.updates_v2_pre  = [l.update_v2(True) for l in layers]
-            self.updates_sigma   = [l.update_sigma() for l in layers]
+            self.updates_sigma   = collect_sigmas(layers)#[l.update_sigma() for l in layers]
             self.updates_Wk      = [l.update_Wk() for l in layers]
             self.updates_pi      = [l.update_pi() for l in layers]
             self.evidence        = sum([l.evidence() for l in layers])
@@ -337,42 +370,37 @@ class model:
         for l in self.layers[1:]:
             params.append([self.session.run(l.W),self.session.run(l.sigmas2_),self.session.run(l.pi),self.session.run(l.b_),self.session.run(l.V_)])
         return params
-    def layer_E_step(self,l,random=1,fineloss=1,verbose=0,mp_opt=0,pretraining=False):
-        if(pretraining==False): updates_m = self.updates_m;updates_v2 = self.updates_v2;KL=self.KL;like0=self.like0
-        else:            updates_m = self.updates_m_pre;updates_v2=self.updates_v2_pre;KL=self.KLs[l];like0=self.like0s[l]
-        GAIN = self.session.run(KL)
-        if(verbose): print 'BEFORE',l,GAIN,self.session.run(like0)
+    def layer_E_step(self,l,random=0,fineloss=0,verbose=2,mp_opt=0,pretraining=False):
+        GAIN = self.session.run(self.KL)
+        if(verbose): print 'BEFORE',l,GAIN,self.session.run(self.like0)
+        self.session.run(self.updates_v2[l])
+        if(verbose): print 'V2',l,self.session.run(self.KL),self.session.run(self.like0)
         # FIRST LAYER CASE
 	if(l==0): 
             self.session.run(self.updates_m[l])
-            self.session.run(self.updates_v2[l])
-            L = self.session.run(KL)
+            L = self.session.run(self.KL)
             if(verbose): print 'FIRST',l,L
             return L-GAIN
         #LAST LAYER CASE
         if(l==(self.L-1)):
             self.session.run(self.updates_m[l])
-            if(verbose): print 'LAST M',self.session.run(KL)
-            self.session.run(self.updates_v2[l])
-            if(verbose): print 'LAST V2',self.session.run(KL)
+            if(verbose): print 'LAST M',self.session.run(self.KL)
             self.session.run(self.updates_p[l])
-            if(verbose): print 'LAST P',self.session.run(KL)
-            L = self.session.run(KL)
+            if(verbose): print 'LAST P',self.session.run(self.KL)
+            L = self.session.run(self.KL)
             return L-GAIN
-        self.session.run(updates_v2[l])
-        if(verbose): print 'V2',l,self.session.run(KL),self.session.run(like0)
         if(isinstance(self.layers[l],layers_.PoolLayer)):
             if(mp_opt==0):
                 self.session.run(self.updates_m[l])
-                if(verbose): print 'M',l,self.session.run(KL),self.session.run(like0)
+                if(verbose): print 'M',l,self.session.run(self.KL),self.session.run(self.like0)
                 self.session.run(self.updates_p[l])
-                if(verbose): print 'P',l,self.session.run(KL),self.session.run(like0)
+                if(verbose): print 'P',l,self.session.run(self.KL),self.session.run(self.like0)
             else:
                 self.session.run(self.updates_p[l])
-                if(verbose): print 'P',l,self.session.run(KL),self.session.run(like0)
+                if(verbose): print 'P',l,self.session.run(self.KL),self.session.run(self.like0)
                 self.session.run(self.updates_m[l])
-                if(verbose): print 'M',l,self.session.run(KL),self.session.run(like0)
-            return self.session.run(KL)-GAIN
+                if(verbose): print 'M',l,self.session.run(self.KL),self.session.run(self.like0)
+            return self.session.run(self.KL)-GAIN
         if(random==0): iih = self.layers[l].p_indices
         else:          iih = self.layers[l].p_indices[permutation(len(self.layers[l].p_indices))]
 	if(isinstance(self.layers[l],layers_.ConvLayer)):
@@ -380,58 +408,61 @@ class model:
             else:          miih = self.layers[l].m_indices[permutation(len(self.layers[l].m_indices))]
             if(mp_opt==0):
                 for i in miih:
-                    self.session.run(updates_m[l],feed_dict={self.layers[l].i_:int32(i[0]),
+                    self.session.run(self.updates_m[l],feed_dict={self.layers[l].i_:int32(i[0]),
                                                                         self.layers[l].j_:int32(i[1])})
-                    if(verbose==2): print 'M',l,self.session.run(KL),self.session.run(like0)
+                    if(verbose==2): print 'M',l,self.session.run(self.KL),self.session.run(self.like0)
                 for i in iih:
                     self.session.run(self.updates_p[l],feed_dict={self.layers[l].i_:int32(i[1]),
                                                                         self.layers[l].j_:int32(i[2]),
                                                                         self.layers[l].k_:int32(i[0])})
-                    if(verbose==2): print 'P',l,self.session.run(KL),self.session.run(like0)
+                    if(verbose==2): print 'P',l,self.session.run(self.KL),self.session.run(self.like0)
             else:
                 for i in iih:
                     self.session.run(self.updates_p[l],feed_dict={self.layers[l].i_:int32(i[1]),
                                                                         self.layers[l].j_:int32(i[2]),
                                                                         self.layers[l].k_:int32(i[0])})
-                    if(verbose==2): print 'P',l,self.session.run(KL),self.session.run(like0)
+                    if(verbose==2): print 'P',l,self.session.run(self.KL),self.session.run(self.like0)
                 for i in miih:
-                    self.session.run(updates_m[l],feed_dict={self.layers[l].i_:int32(i[0]),
+                    self.session.run(self.updates_m[l],feed_dict={self.layers[l].i_:int32(i[0]),
                                                                         self.layers[l].j_:int32(i[1])})
-                    if(verbose==2): print 'M',l,self.session.run(KL),self.session.run(like0) 
-            if(verbose==1): print 'MP',l,self.session.run(KL),self.session.run(like0)
+                    if(verbose==2): print 'M',l,self.session.run(self.KL),self.session.run(self.like0) 
+            if(verbose==1): print 'MP',l,self.session.run(self.KL),self.session.run(self.like0)
 	elif(isinstance(self.layers[l],layers_.DenseLayer)):
             if(mp_opt==0):
-                self.session.run(updates_m[l])
-                if(verbose): print 'M',l,self.session.run(KL),self.session.run(like0)
+                self.session.run(self.updates_m[l])
+                if(verbose): print 'M',l,self.session.run(self.KL),self.session.run(self.like0)
                 for i in iih:
                     self.session.run(self.updates_p[l],feed_dict={self.layers[l].k_:int32(i)})
-                if(verbose): print 'P',l,self.session.run(KL),self.session.run(like0)
+                if(verbose): print 'P',l,self.session.run(self.KL),self.session.run(self.like0)
             else:
                 for i in iih:
                     self.session.run(self.updates_p[l],feed_dict={self.layers[l].k_:int32(i)})
-                if(verbose): print 'P',l,self.session.run(KL),self.session.run(like0)
-                self.session.run(updates_m[l])
-        L = self.session.run(KL)
+                if(verbose): print 'P',l,self.session.run(self.KL),self.session.run(self.like0)
+                self.session.run(self.updates_m[l])
+        L = self.session.run(self.KL)
         return L-GAIN
-    def layer_M_step(self,l,random=1,fineloss=1,verbose=0,pretraining=False):
+    def layer_M_step(self,l,random=0,fineloss=0,verbose=2,pretraining=False):
         #FIRST LAYER
         if(l==0):
             return 0
 	GAIN = self.session.run(self.like1)
-        self.session.run(self.updates_BV[l])
-        if(verbose): print 'BV',l,self.session.run(self.like1)
-        if(pretraining==False):
-            self.session.run(self.updates_sigma[l])
-	    if(verbose): print 'SIGMA',l,self.session.run(self.like1)
         self.session.run(self.updates_pi[l])
         if(verbose): print 'PI ',l,self.session.run(self.like1)
         # CATEGORICAL LAST LAYER
         if(isinstance(self.layers[l],layers_.CategoricalLastLayer)):
             self.session.run(self.updates_Wk[l])
             if(verbose): print 'LW',l,self.session.run(self.like1)
+            self.session.run(self.updates_BV[l])
+            if(verbose): print 'BV',l,self.session.run(self.like1)
+            if(pretraining==False):
+                self.session.run(self.updates_sigma)#################[l])
+                if(verbose): print 'SIGMA',l,self.session.run(self.like1)
             return self.session.run(self.like1)-GAIN
         # POOL LAYER
         if(isinstance(self.layers[l],layers_.PoolLayer)):
+            if(pretraining==False):
+                self.session.run(self.updates_sigma[l])
+                if(verbose): print 'SIGMA',l,self.session.run(self.like1)
             return self.session.run(self.like1)-GAIN
         if(random==0): iih = self.layers[l].W_indices
         else:          iih = self.layers[l].W_indices[permutation(len(self.layers[l].W_indices))]
@@ -447,48 +478,42 @@ class model:
 #								self.layers[l].j_:int32(kk[2])})
                 if(verbose==2): print 'CW',l,self.session.run(self.like1)
 	    if(verbose==1): print 'CW',l,self.session.run(self.like1)
+        self.session.run(self.updates_BV[l])
+        if(verbose): print 'BV',l,self.session.run(self.like1)
+        if(pretraining==False):
+            self.session.run(self.updates_sigma)################[l])
+            if(verbose): print 'SIGMA',l,self.session.run(self.like1)
         L = self.session.run(self.like1)
         return L-GAIN
-    def E_step(self,rcoeff,fineloss=0,random=0,verbose=0,mp_opt=0,per_layer=True,pretraining=-1):
-        if(pretraining==-1): loop = range(self.L)
-        elif(pretraining==1): loop = range(2)
-        else: loop = [pretraining]
+    def E_step(self,rcoeff,fineloss=0,random=0,verbose=0,mp_opt=0,per_layer=True):
         GAINS      = 0
         if(per_layer):
             LAYER_GAIN = rcoeff+1
             while(LAYER_GAIN>rcoeff):
                 LAYER_GAIN = self.session.run(self.KL)
-                for l in loop:
+                for l in xrange(self.L):
                     g_ = rcoeff+1
                     while(g_>rcoeff):
-                        g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt,pretraining=pretraining==l)
-                    if(l==1):
-                        self.session.run(self.BNBN)
-                    if(pretraining==l): break
+                        g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt)
                 LAYER_GAIN = self.session.run(self.KL)-LAYER_GAIN
-#                print "LAYERLAYER",LAYER_GAIN
 	        GAINS+= LAYER_GAIN
         else:
             g = rcoeff+1
             while(g>rcoeff):
                 g=0
-                for l in loop:
-                    g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt,pretraining=pretraining==l)
+                for l in xrange(self.L):
+                    g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt)
                     g+=g_
-                    if(pretraining==l): break
                 print g
                 GAINS+=g
 	return GAINS
-    def M_step(self,rcoeff,fineloss=0,random=0,verbose=0,pretraining=-1):
-        if(pretraining==-1): loop = range(self.L)
-        else: loop = [pretraining]
+    def M_step(self,rcoeff,fineloss=0,random=0,verbose=0):
         GAINS = 0
-        for l in loop:
+        for l in xrange(self.L):
             g_ = rcoeff+1
             while(g_>rcoeff):
-                g_=self.layer_M_step(l,random=random,fineloss=fineloss,verbose=verbose,pretraining=pretraining>-1)
+                g_=self.layer_M_step(l,random=random,fineloss=fineloss,verbose=verbose)
                 GAINS+=g_
-            if(pretraining==l): break
 	return GAINS
     def init_dataset(self,x,y=None):
         """this function initializes the variable of the
@@ -528,124 +553,63 @@ class model:
 
 
 
-def pretrain(model,rcoeff_schedule,alpha_schedule,CPT,random=0,fineloss=1,return_time=0,verbose=0,per_layer=0,mp_opt=0,partial_E=False,G=False):
-    """ mp_opt : { 0,1,2,3}, m then p, p then m, mpmpmp, pmpmpm"""
-    LIKE=[]
+def pretrain(model,OPT=False):
     for LAYERS in xrange(1,model.L-1):
-        cpt  = 0
-        alpha_schedule.reset()
-        rcoeff_schedule.reset()
-        while(cpt<CPT):# and GAIN>0):
-            print 'Pretraining',LAYERS,'\t','Epoch...',cpt
-            if(alpha_schedule.opt=='mean'): alpha_schedule.reset()
-            cpt    += 1
-            indices = generate_batch_indices(model.N,model.bs)
-            for i in range(len(indices)):
-                print 'Pretraining',LAYERS,'\t','  Batch...',i
-                model.set_batch(indices[i])
-                print 'Pretraining',LAYERS,'\t',"\tBEFORE E",model.session.run(model.KL),model.session.run(model.like0s[LAYERS])
-#            print model.layers_[model.layers[-1]].p[indices[i]]
-                print 'Pretraining',LAYERS,'\t',bincount(argmax(model.layers_[model.layers[-1]].p[indices[i]],1))
-                if(alpha_schedule.opt=='mean'):  model.set_alpha(float32(alpha_schedule.get()))
-                else:                            model.set_alpha(float32(alpha_schedule.get()))
-    	        model.E_step(rcoeff=rcoeff_schedule.get(),random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt,per_layer=per_layer,pretraining=LAYERS)
-                print 'Pretraining',LAYERS,'\t',"\tAFTER E",model.session.run(model.KL),model.session.run(model.like0s[LAYERS])
-                model.save_batch(indices[i])
-                model.session.run(model.updates_S)
-                if(partial_E):
-                    print 'Pretraining',LAYERS,'\t',"\tBEFORE M",model.session.run(model.like1)
-                    g = model.M_step(rcoeff=rcoeff_schedule.get(),random=random,fineloss=fineloss,verbose=verbose,pretraining=LAYERS)
-                    LIKE.append(model.session.run(model.like1))
-                    print 'Pretraining',LAYERS,'\t',"\tAFTER M",LIKE[-3:]
-	            GAIN = g
-	            print 'Pretraining',LAYERS,'\t',"\tgain",g
-#            print model.layers_[model.layers[-1]].p[indices[i]]
-            if(partial_E==0):
-                print 'Pretraining',LAYERS,'\t',"\tBEFORE M",model.session.run(model.like1)
-                g = model.M_step(rcoeff=rcoeff_schedule.get(),random=random,fineloss=fineloss,verbose=verbose,pretraining=LAYERS)
-                LIKE.append(model.session.run(model.like1s[LAYERS]))
-                print 'Pretraining',LAYERS,'\t',"\tAFTER M",LIKE[-3:]
-                GAIN = g
-                print 'Pretraining',LAYERS,'\t',"\tgain",g
-        if(1):
-            figure()
-            n_ = randint(200)
-            if(isinstance(model.layers[1],layers_.ConvLayer)):
-                subplot(3,model.layers[1].K,1)
-                imshow(model.layers_[model.layers[0]].m[n_,:,:,0],aspect='auto')
-                for k in xrange(model.layers[1].K):
-                    subplot(3,model.layers[1].K,1+model.layers[1].K+k)
-                    imshow(model.layers_[model.layers[1]].m[n_,k],aspect='auto')
-                    subplot(3,model.layers[1].K,1+model.layers[1].K*2+k)
-                    imshow(model.layers_[model.layers[1]].p[n_,k,:,:,0],aspect='auto')
-            figure()
-            if(isinstance(model.layers[2],layers_.PoolLayer)):
-                for k in xrange(model.layers[2].K):
-                    subplot(2,model.layers[2].K,1+k)
-                    imshow(model.layers_[model.layers[2]].m[n_,k],aspect='auto')
-                    subplot(2,model.layers[2].K,1+model.layers[2].K+k)
-                    imshow(model.layers_[model.layers[2]].p[n_,k,:,:,0],aspect='auto')
-                    print model.layers_[model.layers[2]].p[n_,k,:,:,0]
-            show()
-            print bincount(argmax(model.layers_[model.layers[-1]].p[indices[i]],1))
-        if(LAYERS<model.L-1):
-            print 'Pretraining',LAYERS, 'done,\n\t->>>>statistics of m:\n',model.layers_[model.layers[LAYERS]].m.mean(0),model.layers_[model.layers[LAYERS]].m.std(0),'\n\t->>>>statistics of p',model.layers_[model.layers[LAYERS]].p[:,:,0].mean(0),(model.layers_[model.layers[LAYERS]].p[:,:,0]*model.layers_[model.layers[LAYERS]].p[:,:,1]).mean(0)
-    return LIKE
-
+        indices = generate_batch_indices(model.N,model.bs)
+        if(len(model.layers[LAYERS].output_shape)==2):
+            nn   = shape(model.layers_[model.layers[LAYERS-1]].m)
+            what,b = PCA(model.layers_[model.layers[LAYERS-1]].m.reshape((nn[0],-1)),model.layers[LAYERS].K,OPT)
+            model.session.run(model.layers[LAYERS].init_W(what,reshape(b,[-1])))
+        elif(isinstance(model.layers[LAYERS],layers_.ConvLayer)):
+            P = extract_patches(model.layers_[model.layers[LAYERS-1]].m,model.layers[LAYERS].Ic)
+            what,_ = PCA(P,model.layers[LAYERS].K,OPT)
+            what = what.reshape((model.layers[LAYERS].K,model.layers[LAYERS].Ic,model.layers[LAYERS].Ic,model.layers[LAYERS].C))
+            model.session.run(model.layers[LAYERS].init_W(what))
+        for i in range(len(indices)):
+            model.set_batch(indices[i])
+            for iiii in xrange(25):
+                print iiii
+                g=model.layer_E_step(LAYERS,pretraining=True,verbose=0)
+                print g
+            model.save_batch(indices[i])
 
 
 
 
 def train_layer_model(model,rcoeff_schedule,alpha_schedule,CPT,random=0,fineloss=1,return_time=0,verbose=0,per_layer=0,mp_opt=0,partial_E=False,G=False,PLOT=False):
     """ mp_opt : { 0,1,2,3}, m then p, p then m, mpmpmp, pmpmpm"""
-    cpt  = 0
     LIKE = []
-    GAIN = 1
-    print "INIT",model.session.run(model.KL),model.session.run(model.like0)
-    while(cpt<CPT):# and GAIN>0):
-        print 'Epoch...',cpt
+    for epoch in xrange(CPT):# and GAIN>0):
         if(alpha_schedule.opt=='mean'): alpha_schedule.reset()
-        cpt    += 1
         indices = generate_batch_indices(model.N,model.bs)
-        for i in range(len(indices)):
-            print '  Batch...',i
-            model.set_batch(indices[i])
-#            if(alpha_schedule.opt=='mean'):  model.set_alpha(float32(alpha_schedule.get()))
-#            else:                            model.set_alpha(float32(alpha_schedule.get()))
-#            model.session.run(model.updates_S)
-            print "AFTER UPDATE",model.session.run(model.like0),model.session.run(model.like1)
-            print "\tBEFORE E",model.session.run(model.KL),model.session.run(model.like0)#,model.session.run(model.like1)
+        for batch in range(len(indices)):
+            print 'Epoch...',epoch,'/',CPT,'  Batch...',batch,'/',len(indices)
+            model.set_batch(indices[batch])
             t=time.time()
-	    model.E_step(rcoeff=rcoeff_schedule.get(),random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt,per_layer=per_layer)
-            print "\tAFTER E",model.session.run(model.KL),model.session.run(model.like0),time.time()-t
-#            print bincount(argmax(model.session.run(model.layers[-1].p_),1))
-            model.save_batch(indices[i])
+	    g=model.E_step(rcoeff=rcoeff_schedule.get(),random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt,per_layer=per_layer)
+            print "\tAFTER E",model.session.run(model.KL),model.session.run(model.like0),'   gain',g,'  time:',time.time()-t
+            model.save_batch(indices[batch])
             if(alpha_schedule.opt=='mean'):  model.set_alpha(float32(alpha_schedule.get()))
             else:                            model.set_alpha(float32(alpha_schedule.get()))
             model.session.run(model.updates_S)
-            print "AFTER UPDATE",model.session.run(model.like0),model.session.run(model.like1)
+#            print "AFTER UPDATE",model.session.run(model.like0),model.session.run(model.like1)
             if(partial_E):
                 if(PLOT):
-                    for ll in xrange(model.L-1):
-                        plot_layer(model,ll,10,1)
+                    for ll in xrange(model.L-1): plot_layer(model,ll,10,1)
                     show()
-                print "\tBEFORE M",model.session.run(model.KL),model.session.run(model.like0),model.session.run(model.like1)
+                t=time.time()
                 g = model.M_step(rcoeff=rcoeff_schedule.get(),random=random,fineloss=fineloss,verbose=verbose)
                 LIKE.append(model.session.run(model.like1))
-                print "\tAFTER M",model.session.run(model.KL),model.session.run(model.like0),LIKE[-8:]
-	        GAIN = g
-	        print "\tgain",g
+                print "\tAFTER M",model.session.run(model.KL),model.session.run(model.like0),LIKE[-3:],'   gain',g,'   time',time.time()-t
         if(partial_E==0):
             if(PLOT):
-                for ll in xrange(model.L-1):
-                    plot_layer(model,ll,10,1)
+                for ll in xrange(model.L-1): plot_layer(model,ll,10,1)
                 show()
-            print "\tBEFORE M",model.session.run(model.KL),model.session.run(model.like0),model.session.run(model.like1)
+            t=time.time()
             g = model.M_step(rcoeff=rcoeff_schedule.get(),random=random,fineloss=fineloss,verbose=verbose)
             LIKE.append(model.session.run(model.like1))
-            print "\tAFTER M",model.session.run(model.KL),model.session.run(model.like0),LIKE[-8:]
-            GAIN = g
-	    print "\tgain",g
+            print "\tAFTER M",model.session.run(model.KL),model.session.run(model.like0),LIKE[-3:],'   gain',g,'   time',time.time()-t
+            print [model.session.run(model.layers[l].sigmas2_)[0] for l in xrange(1,model.L)]
     return LIKE
 
 
@@ -665,23 +629,33 @@ from sklearn.cross_validation import train_test_split
 
 
 
-def load_data(DATASET,k=-1):
+def load_data(DATASET,k=-1,unlabeled=False):
     if(DATASET=='MNIST'):
         mnist         = fetch_mldata('MNIST original')
         x             = mnist.data.reshape(70000,1,28,28).astype('float32')
         y             = mnist.target.astype('int32')
         x_train,x_test,y_train,y_test = train_test_split(x,y,test_size=10000,stratify=y)
-        input_shape   = (batch_size,28,28,1)
+        Y_mask = zeros(len(x_train))
+    elif(DATASET=='STL10'):
+        x_train = read_all_images('../../DATASET/STL10/train_X.bin')
+        y_train = read_labels('../../DATASET/STL10/train_y.bin')
+        x_test  = read_all_images('../../DATASET/STL10/train_X.bin')
+        y_test  = read_labels('../../DATASET/STL10/test_y.bin')
+        if(unlabeled):
+            x_unsup = read_all_images('../../DATASET/SST10/unlabeled.bin')
+            x_train = concatenate([x_train,x_unsup],0)
+            y_train = concatenate([my_onehot(y_train,10),ones((x_unsup.shape[0],10))/10])
+            Y_mask  = concatenate([zeros(len(y_train)),ones(x_unsup.shape[0])])
+        else: Y_mask = zeros(len(y_train))
     elif(DATASET=='FASHION'):
         from numpy import loadtxt
-#        zf = zipfile.ZipFile('../../DATASET/fashion-mnist_train.csv.zip')
         ff = loadtxt('../../DATASET/fashion-mnist_train.csv',delimiter=',',skiprows=1)
         x_train = ff[:,1:].reshape((-1,1,28,28)).astype('float32')
         y_train = ff[:,0].astype('int32')
-#        zf = zipfile.ZipFile('../DATASET/fashion-mnist_test.csv.zip',delimiter=',')
         ff = loadtxt('../../DATASET/fashion-mnist_test.csv',delimiter=',',skiprows=1)
         x_test = ff[:,1:].reshape((-1,1,28,28)).astype('float32')
         y_test = ff[:,0].astype('int32')
+        Y_mask = zeros(len(x_train))
     elif(DATASET=='flippedMNIST'):
         batch_size = 50
         mnist         = fetch_mldata('MNIST original')
@@ -703,6 +677,7 @@ def load_data(DATASET,k=-1):
 	if(k>=0):
 	    x_train = x_train[y_train==k]
 	    y_train = y_train[y_train==k]*0
+        Y_mask = zeros(len(x_train))
     elif(DATASET == 'CIFAR100'):
 	batch_size = 100
         TRAIN,TEST = load_cifar100(3)
@@ -736,7 +711,7 @@ def load_data(DATASET,k=-1):
         n_epochs = 150
     ptr = permutation(len(x_train))
     pte = permutation(len(x_test))
-    if(DATASET=='CIFAR'):
+    if(DATASET=='CIFAR' or DATASET=='STL10'):
         x_train          -= x_train.mean((1,2,3),keepdims=True)
         x_test           -= x_test.mean((1,2,3),keepdims=True)
     x_train          /= abs(x_train).max((1,2,3),keepdims=True)
@@ -745,7 +720,35 @@ def load_data(DATASET,k=-1):
     x_test            = x_test.astype('float32')
     y_train           = array(y_train).astype('int32')
     y_test            = array(y_test).astype('int32')
-    return x_train[ptr],y_train[ptr],x_test[pte],y_test[pte]
+    return x_train[ptr],y_train[ptr],x_test[pte],y_test[pte],Y_mask
+
+
+
+
+
+
+
+
+
+#### SST 10
+def read_labels(path_to_labels):
+    with open(path_to_labels, 'rb') as f:
+        labels = np.fromfile(f, dtype=np.uint8)
+        return labels
+
+
+def read_all_images(path_to_data):
+    with open(path_to_data, 'rb') as f:
+        everything = np.fromfile(f, dtype=np.uint8)
+        images = np.reshape(everything, (-1, 3, 96, 96))
+        images = np.transpose(images, (0, 3, 2, 1))
+        return images.astype('float32')
+
+
+
+
+
+
 
 
 

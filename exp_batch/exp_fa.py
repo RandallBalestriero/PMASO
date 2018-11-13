@@ -48,30 +48,33 @@ def doit(pred,y,K):
     return mean((yhat==y).astype('float32'))
     
 
-DATASET = 'CIFAR'
+DATASET = 'STL10'
 
 sigmass  = 'global'
 
 MODEL    = 1
 NEURONS  = 10
 
-N = 5000
-BS =500
+N = 1200
+BS =64
 
-leakiness = float32(0.01)
+leakiness = float32(0.001)
 
 supss     = 0
 
-x_train,y_train,x_test,y_test = load_data(DATASET)
+x_train,y_train,x_test,y_test,Y_mask = load_data(DATASET)
 
 pp = permutation(N)
-XX = x_train[pp]*.10010010#*2.1#+randn(len(pp),3,32,32)*0.0001
+XX = x_train[pp]#+randn(len(pp),1,28,28)*0.001
 YY = y_train[pp]
 
 #XX = transpose(XX,[0,2,3,1])
 #x_test = transpose(x_test,[0,2,3,1])
 #input_shape = [BS,28,28,1]
-input_shape = [BS,32,32,3]
+input_shape = [BS,96,96,3]
+
+
+#input_shape = [BS,32,32,3]
 
 
 
@@ -79,20 +82,13 @@ input_shape = [BS,32,32,3]
 
 with tf.device('/device:GPU:0'): 
     MODEL1 = [InputLayer(input_shape)]
-    MODEL1.append(ConvLayer(MODEL1[-1],K=8,Ic=5,Jc=5,R=2,leakiness=0,sparsity_prior=0.,sigma='channel',update_b='channel'))
-    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
-    MODEL1.append(DenseLayer(MODEL1[-1],K=256,R=2,leakiness=leakiness,sparsity_prior=0.,sigma='channel',update_b=True))
-    MODEL1.append(ContinuousLastLayer(MODEL1[-1],128,'global'))
-#    MODEL1.append(ConvLayer(MODEL1[-1],K=32,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='channel',update_b='channel'))
+#    MODEL1.append(ConvLayer(MODEL1[-1],K=8,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='channel',update_b='channel'))
 #    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
-#    MODEL1.append(DenseLayer(MODEL1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=0.,sigma='global',update_b=True))
-#    MODEL1.append(CategoricalLastLayer(MODEL1[-1],R=NEURONS,sparsity_prior=.0,sigma='global',update_b=True))
-#        layers1.append(DenseLayer(layers1[-1],K=128,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass,update_b=True))
-#        layers1.append(ConvLayer(layers1[-1],K=3,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='global'))
-#    layers1.append(PoolLayer(layers1[-1],Ic=2,Jc=2,sigma='global'))
-#    layers1.append(DenseLayer(layers1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass,update_b=True,G=False))
-#    layers1.append(DenseLayer(layers1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=0.001,sigma=sigmass,update_b=True,G=False))
-#    layers1.append(DenseLayer(layers1[-1],K=32,R=2,leakiness=leakiness,sparsity_prior=0.00,sigma=sigmass,update_b=True,G=False))
+#    MODEL1.append(ConvLayer(MODEL1[-1],K=32,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='channel',update_b='channel'))
+#    MODEL1.append(PoolLayer(MODEL1[-1],Ic=3,Jc=3,sigma='channel'))
+#    MODEL1.append(DenseLayer(MODEL1[-1],K=256,R=2,leakiness=leakiness,sparsity_prior=0.,sigma='global',update_b=True))
+    MODEL1.append(DenseLayer(MODEL1[-1],K=512,R=2,leakiness=leakiness,sparsity_prior=0.,sigma='global',update_b=True))
+    MODEL1.append(ContinuousLastLayer(MODEL1[-1],256,'global'))
 
 
 
@@ -111,7 +107,7 @@ model1 = model(MODEL1,XX)
 #LOSSES  = pretrain(model1,rcoeff_schedule=schedule(0.0001005,'linear'),alpha_schedule=schedule(0.5,'mean'),CPT=5,random=1,fineloss=0,verbose=1,per_layer=1,mp_opt=0,partial_E=0,G=False)
 
 for i in xrange(1):
-    LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(.5005,'linear'),alpha_schedule=schedule(0.5,'mean'),CPT=100,random=1,fineloss=0,verbose=1,per_layer=1,mp_opt=0,partial_E=0,PLOT=0)
+    LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(.2005,'linear'),alpha_schedule=schedule(0.5,'mean'),CPT=200,random=0,fineloss=0,verbose=0,per_layer=1,mp_opt=0,partial_E=0,PLOT=0)
 #    y_hat1   = argmax(model1.layers_[model1.layers[-1]].p,1)
 #    CL      = doit(y_hat1,YY,NEURONS)
 #    print CL
@@ -121,10 +117,13 @@ for i in xrange(1):
 reconstruction = model1.reconstruct()[:3000]
 #samplesclass0=[model1.sampleclass(0,k)[:150] for k in xrange(NEURONS)]
 #samplesclass1=[model1.sampleclass(1,k)[:150] for k in xrange(NEURONS)]
-samples=model1.sample(1)[:3000]
+samples1=concatenate([model1.sample(1) for i in xrange(20)],0)
+samples2=concatenate([model1.sample(0.5) for i in xrange(20)],0)
+samples3=concatenate([model1.sample(0.01) for i in xrange(20)],0)
+
 
 f=open(SAVE_DIR+'exp_batch_'+str(N)+'_'+str(BS)+'_'+str(MODEL)+'_'+str(NEURONS)+'.pkl','wb')
-cPickle.dump([LOSSES,reconstruction,XX[:3000],YY[:3000],samples,samples],f)
+cPickle.dump([LOSSES,reconstruction,XX[:3000],samples1,samples2,samples3],f)
 f.close()
 
 

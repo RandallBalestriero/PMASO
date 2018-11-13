@@ -5,7 +5,7 @@ import itertools
 from math import pi as PI_CONST
 
 
-eps = float32(0.000000000001)
+eps = float32(0.000001)
 
 class BN:
     def __init__(self,center,scale):
@@ -53,6 +53,8 @@ def mysumpool(x,p):
 
 
 class Layer:
+    def init_W(self):
+        return []
     def BN(self):
         return []
     def update_b(self):
@@ -107,11 +109,12 @@ class DenseLayer(Layer):
 	self.drop_   = tf.Variable(tf.ones((self.K,2,self.bs))*tf.reshape(tf.one_hot(1,2),[1,2,1]),trainable=False)
         self.sigmas2_= tf.Variable(tf.ones(self.D_in))
         self.sigmas2 = tf.expand_dims(self.sigmas2_,0)
-        init_W = init_W(float32(1))
+        init_W = tf.random_normal#init_W(float32(1))
         if(leakiness is None):
-	    self.W_  = tf.Variable(init_W((K,R,self.D_in))/sqrt(K+prod(self.input_shape[1:])))
+            self.W_  = tf.Variable(init_W((K,R,self.D_in))/sqrt(K+prod(self.input_shape[1:])))
             self.W   = self.W_
         else:
+            print sqrt(K+prod(self.input_shape[1:]))
             self.W_  = tf.Variable(init_W((K,1,self.D_in))/sqrt(K+prod(self.input_shape[1:])))
             self.W   = tf.concat([self.W_,self.W_*self.leakiness],axis=1)
 	self.pi      = tf.Variable(mysoftmax(tf.ones((K,R))))#;tf.add_to_collection('PARAMS',self.pi)
@@ -146,7 +149,10 @@ class DenseLayer(Layer):
         else:
             self.is_flat = True
             self.input_  = self.input
-#                        self.input_,self.bn_m,self.bn_v = bn(self.input,[0])
+    def init_W(self,W,b):
+        if(self.leakiness is not None):
+            return tf.group(tf.assign(self.W_,W[:,newaxis,:]),tf.assign(self.b_,b))
+        else: return tf.group(tf.assign(self.W_,concatenate([W[:,newaxis,:],randn(self.K,self.R-1,self.D_in)*norm(W[0],2)/sqrt(self.D_in)],1)),tf.assign(self.b_,b))
     def vector2tensor(self,u):
         return tf.reshape(u,self.input_shape)
     def update_S(self):
@@ -215,40 +221,37 @@ class DenseLayer(Layer):
         return k1+k2+k3+k4+(reconstruction+input_v2+sum_norm_k+m2v2+currentv2+extra_v2)
     def likelihood(self,batch=None,pretraining=False):
         if(batch==False):
-            if(pretraining==False): extra_k = 0
-            else:                   extra_k = -0.5*tf.reduce_sum(tf.square(self.m_)+self.v2_)/self.bs
             if(self.residual):
-                currentv2 = -tf.einsum('kn,k->',self.v2_,tf.square(self.V_)/self.sigmas2_)
-                extra_v2  = -tf.einsum('kn,knr,rk,k->',self.v2_,self.p_,tf.map_fn(lambda r:tf.diag_part(self.W[:,r,:]),tf.range(self.R,dtype=tf.int32),dtype=tf.float32),self.V_/self.sigmas2_)*2
+                currentv2 = -tf.einsum('kn,k->',self.v2_,tf.square(self.V_)*0.5/self.sigmas2_)/self.bs
+                extra_v2  = -tf.einsum('kn,knr,rk,k->',self.v2_,self.p_,tf.map_fn(lambda r:tf.diag_part(self.W[:,r,:]),tf.range(self.R,dtype=tf.int32),dtype=tf.float32),self.V_/self.sigmas2_)/self.bs
             else:currentv2 = 0 ; extra_v2 = 0
-            if(self.p_drop>0): k1 = tf.reduce_sum(self.drop_[:,0])*tf.log(self.p_drop)+tf.reduce_sum(self.drop_[:,1])*tf.log(float32(1)-self.p_drop)
-            else:              k1 = 0
-            k2  = -tf.log(2*PI_CONST)*float32(self.D_in*0.5)-tf.reduce_sum(tf.log(self.sigmas2_))*float32(0.5)                            #(1)
-            k3  = tf.einsum('knr,kr->',self.p_,tf.log(self.pi))*2                                #(1)
-            reconstruction    = -tf.einsum('nd,d->',tf.square(self.input_-self.b-self.backward(flat=1,resi=1)),1/self.sigmas2_)                   #(1)
-            if(self.is_flat): input_v2 = -tf.einsum('dn,d->',self.input_layer.v2_,1/self.sigmas2_)  #(1)
-            else:             input_v2 = -tf.reduce_sum(tf.reshape(tf.reduce_sum(self.input_layer.v2,0),[self.D_in])/self.sigmas2_) #(1)
-            sum_norm_k      = tf.einsum('kdn,d->',tf.square(tf.einsum('krd,knr,kn->kdn',self.W,self.p_,self.m_*self.drop_[:,1])),1/self.sigmas2_)
-            m2v2   = -tf.reduce_sum(self.drop_[:,1]*(self.v2_+tf.square(self.m_))*tf.einsum('knr,krd,d->kn',self.p_,tf.square(self.W),1/self.sigmas2_))
-            return k2+(k1+k3+m2v2+reconstruction+input_v2+sum_norm_k+currentv2+extra_v2)*float32(0.5/self.bs)-self.sparsity_prior*tf.reduce_sum(tf.square(self.W))+extra_k
+            if(self.p_drop>0): k1 = tf.reduce_sum(self.drop_[:,0])*tf.log(self.p_drop)/self.bs+tf.reduce_sum(self.drop_[:,1])*tf.log(float32(1)-self.p_drop)/self.bs
+            else:              k1 = float32(0)
+            k2  = -tf.log(2*PI_CONST)*float32(self.D_in*0.5)-tf.reduce_sum(tf.log(self.sigmas2_))*float32(0.5)+tf.einsum('knr,kr->',self.p_,tf.log(self.pi))/self.bs
+            k3  = -tf.einsum('nd,d->',tf.square(self.input_-self.b-self.backward(flat=1,resi=1)),1/self.sigmas2_)*float32(0.5/self.bs)
+            if(self.is_flat): k4 = -tf.einsum('dn,d->',self.input_layer.v2_,0.5/self.sigmas2_)/self.bs  #(1)
+            else:             k4 = -tf.reduce_sum(tf.reshape(tf.reduce_sum(self.input_layer.v2,0),[self.D_in])*0.5/self.sigmas2_)/self.bs #(1)
+            k5  = tf.einsum('kdn,d->',tf.square(tf.einsum('krd,knr,kn->kdn',self.W,self.p_,self.m_*self.drop_[:,1])),0.5/self.sigmas2_)/self.bs
+            k6  = -tf.reduce_sum(self.drop_[:,1]*(self.v2_+tf.square(self.m_))*tf.einsum('knr,krd,d->kn',self.p_,tf.square(self.W),0.5/self.sigmas2_))/self.bs
+            return k1+k2+k3+k4+k5+k6+currentv2+extra_v2-self.sparsity_prior*tf.reduce_sum(tf.square(self.W))*0.5
         else:
             k1 = tf.log(2*PI_CONST)*float32(self.D_in*0.5)+tf.reduce_sum(tf.log(self.sigmas2_)*float32(0.5))
             k2 = tf.reduce_sum((self.S8+self.S4-2*self.b_*self.S6+tf.square(self.b_))/(2*self.sigmas2_))
             k3 = tf.einsum('krd,d->',(self.S1-tf.einsum('kr,d->krd',self.S2,self.b_))*self.W,1/self.sigmas2_)
             k4 = tf.einsum('abcd,abu,cdu->',self.S5,self.W,self.W/tf.expand_dims(2*self.sigmas2,0))
             k5 = tf.reduce_sum(tf.log(self.pi)*self.S7-self.S3*tf.einsum('krd,d->kr',tf.square(self.W),0.5/self.sigmas2_))
-            return -k1-k2+k3-k4+k5
+            return -k1-k2+k3-k4+k5-self.sparsity_prior*tf.reduce_sum(tf.square(self.W))*0.5
     def KL(self,pretraining=False):
 	if(self.p_drop>0):
-            return self.likelihood(0,pretraining)+(-tf.reduce_sum(self.p_*tf.log(self.p_+eps))+tf.reduce_sum(tf.log(self.v2_+eps))*float32(0.5)\
+            return self.likelihood(0)+(-tf.reduce_sum(self.p_*tf.log(self.p_+eps))+tf.reduce_sum(tf.log(self.v2_+eps))*float32(0.5)\
 			-tf.reduce_sum(self.drop_*tf.log(self.drop_+eps)))/float32(self.bs)+float32(self.D_in/2.0)*tf.log(2*PI_CONST)
 	else:
-            return self.likelihood(0,pretraining)+(-tf.reduce_sum(self.p_*tf.log(self.p_+eps))+tf.reduce_sum(tf.log(self.v2_+eps))*float32(0.5))/float32(self.bs)+float32(self.D_in/2.0)*tf.log(2*PI_CONST)
+            return self.likelihood(0)+(-tf.reduce_sum(self.p_*tf.log(self.p_+eps))+tf.reduce_sum(tf.log(self.v2_+eps))*float32(0.5))/float32(self.bs)+float32(self.D_in/2.0)*tf.log(2*PI_CONST)
                                                             ################### E STEP VARIABLES
     def update_v2(self,pretraining=False):
         if(pretraining==False): next_sigmas = self.next_layer.sigmas2
         else:                   next_sigmas = tf.ones_like(self.next_layer.sigmas2)
-        scalor = tf.reduce_min(next_sigmas)
+        scalor = tf.reduce_min(self.sigmas2_)
 	a40 = self.drop_[:,1]*tf.einsum('knr,krd,d->kn',self.p_,tf.square(self.W),scalor/self.sigmas2_)+scalor/tf.transpose(next_sigmas)
 	if(self.residual==0):  a4 = a40
 	else:                  a4 = a40+tf.expand_dims(tf.square(self.V_)*scalor/self.sigmas2_,-1)+2*tf.einsum('knr,rk,k->kn',self.p_,tf.map_fn(lambda r:tf.diag_part(self.W[:,r,:]),tf.range(self.R),dtype=tf.float32),self.V_*scalor/self.sigmas2_)
@@ -264,7 +267,7 @@ class DenseLayer(Layer):
         Wp = tf.einsum('krd,knr->nkd',self.W,self.p_)
         b  = tf.einsum('nd,nkd->nk',(self.input_-self.b)*rescalor/self.sigmas2,Wp)+back
         D  = tf.matrix_diag(tf.einsum('krd,d,knr->nk',tf.square(self.W),rescalor/self.sigmas2_,self.p_))
-        A  = tf.einsum('nkd,nad->nka',Wp,Wp*rescalor/tf.expand_dims(self.sigmas2,0))*(1-tf.expand_dims(tf.eye(self.K),0))+tf.expand_dims(tf.diag(rescalor/next_sigmas[0]),0)+D
+        A  = tf.einsum('nkd,nad->nka',Wp,Wp*rescalor/tf.expand_dims(self.sigmas2,0))*(1-tf.expand_dims(tf.eye(self.K),0))+tf.expand_dims(tf.diag(rescalor/next_sigmas[0]+0.000000000001),0)+D
         with(tf.device('/device:CPU:0')):
             new_m = tf.matrix_solve(A,tf.expand_dims(b,-1))[:,:,0]#,l2_regularizer=0,fast=True)[:,:,0]
         return tf.assign(self.m_,tf.transpose(new_m))
@@ -291,9 +294,10 @@ class DenseLayer(Layer):
         new_drop = mysoftmax(tf.stack([filled0,filled1-squared*float32(0.5)+proj]),axis=0,coeff=0.)
         return tf.group(new_m,new_p,tf.scatter_update(self.drop_,[k],[new_drop]))
                                             ######################## M STEP VARIABLES
-    def update_sigma(self):
+    def update_sigma(self,get_value=False):
         value = self.S8+tf.square(self.b_)+self.S4+tf.einsum('kr,krd->d',self.S3,tf.square(self.W))+tf.einsum('kruv,krd,uvd->d',self.S5,self.W,self.W)-2*tf.einsum('krd,krd->d',self.S1,self.W)+2*self.b_*(tf.einsum('kr,krd->d',self.S2,self.W)-self.S6)
-        value_ = tf.clip_by_value(value,0.000001,1000)
+        value_ = tf.clip_by_value(value,0.0000000001,1000)
+        if(get_value): return value_
         if(self.sigma_opt=='local'):     return tf.assign(self.sigmas2_,value_)
         elif(self.sigma_opt=='global'):  return tf.assign(self.sigmas2_,tf.fill([self.D_in],tf.reduce_sum(value_)/self.D_in))
         elif(self.sigma_opt=='channel'):
@@ -323,7 +327,7 @@ class DenseLayer(Layer):
 
 
 class ConvLayer:
-    def __init__(self,input_layer,K,Ic,Jc,R,sparsity_prior = 0,leakiness=None,sigma='local',alpha=0.5,init_W = tf.orthogonal_initializer(),update_b=True):
+    def __init__(self,input_layer,K,Ic,Jc,R,sparsity_prior = 0,leakiness=None,sigma='local',alpha=0.5,init_W = tf.random_normal,update_b=True):
         self.alpha             = tf.Variable(alpha)
         self.update_b          = update_b
         self.leakiness         = leakiness
@@ -339,11 +343,10 @@ class ConvLayer:
 	self.D_in              = prod(self.input_shape[1:])
         self.I,self.J          = self.output_shape[1],self.output_shape[2]
         self.input_patch       = self.extract_patch(self.input,with_n=1)
-        self.pi_               = PI_CONST
-        self.W_                = tf.Variable(init_W((self.K,self.Ic,self.Jc,self.C)));tf.add_to_collection('PARAMS',self.W_)
+        self.W_                = tf.Variable(init_W((self.K,self.Ic,self.Jc,self.C))/sqrt(self.K+self.Ic+self.Jc+self.C))
         self.W                 = tf.stack([self.W_,tf.zeros_like(self.W_)],axis=1)
 	# WE DEFINE THE PARAMETERS
-        self.pi             = tf.Variable(mysoftmax(tf.random_normal((K,R)),axis=1));tf.add_to_collection('PARAMS',self.W_)
+        self.pi             = tf.Variable(mysoftmax(tf.zeros((K,R)),axis=1));tf.add_to_collection('PARAMS',self.W_)
 	self.sigmas2_       = tf.Variable(tf.ones((self.Iin,self.Jin,self.C)));tf.add_to_collection('PARAMS',self.sigmas2_)
 	self.sigmas2        = tf.expand_dims(self.sigmas2_,0)
         self.sigmas2_patch_ = self.extract_patch(self.sigmas2,with_n=0)
@@ -355,7 +358,7 @@ class ConvLayer:
         self.b_patch = tf.expand_dims(self.b_patch_,0)
 	self.m_      = tf.Variable(tf.zeros((K,self.I,self.J,self.bs)));tf.add_to_collection('LATENT',self.m_)
         self.m       = tf.transpose(self.m_,[3,1,2,0])   # (N I J K)
-	self.p_      = tf.Variable(mysoftmax(tf.random_normal((K,self.I,self.J,self.R,self.bs)),axis=3));tf.add_to_collection('LATENT',self.p_)# (K,I,J,R,N)
+	self.p_      = tf.Variable(mysoftmax(tf.random_normal((K,self.I,self.J,self.R,self.bs))*0,axis=3));tf.add_to_collection('LATENT',self.p_)# (K,I,J,R,N)
         self.p       = tf.transpose(self.p_,[4,1,2,0,3]) # (N I J K R)
         self.v2_     = tf.Variable(tf.ones((self.K,self.I,self.J,self.bs)));tf.add_to_collection('LATENT',self.v2_) # (K I J N)
         self.v2      = tf.transpose(self.v2_,[3,1,2,0])
@@ -391,6 +394,8 @@ class ConvLayer:
         m_mask         = tf.ones((self.K,1,1,1))*tf.reshape(tf.tile(tf.one_hot(self.i_,self.ratio),[(self.I/self.ratio+1)]),(1,(self.I/self.ratio+1)*self.ratio,1,1))*tf.reshape(tf.tile(tf.one_hot(self.j_,self.ratio),[self.J/self.ratio+1]),(1,1,(self.J/self.ratio+1)*self.ratio,1))
         self.m_mask    = m_mask[:,:self.I,:self.J]
         self.E= tf.einsum('ij,kc,a,b->kijcab',tf.ones((self.I,self.J)),tf.eye(self.K),tf.one_hot(self.Ic-1,2*self.Ic-1),tf.one_hot(self.Ic-1,2*self.Ic-1))
+    def init_W(self,W):
+        return tf.assign(self.W_,W)
     def BN(self): return []#return tf.assign(self.m_,bn(self.m_,[1,2,3])[0])
     def filter_corr(self,A,B):
         #takes as input filter banks A and B of same shape (K a b c)
@@ -406,7 +411,7 @@ class ConvLayer:
         S5 = tf.einsum('kijn,nijabc->kijcab',self.m_*self.p_[:,:,:,0],mp_patches)/self.bs
         S6 = tf.reduce_sum(self.m_*self.p_[:,:,:,0],3)/self.bs
         S7 = tf.reduce_sum(self.input_layer.m_,3)/self.bs
-        S8 = tf.reduce_sum(self.p_,[1,2,4])/self.bs
+        S8 = tf.reduce_sum(tf.clip_by_value(self.p_,0.02,0.98),[1,2,4])/self.bs
         return tf.group(tf.assign(self.S1,self.alpha*S1+(1-self.alpha)*self.S1),tf.assign(self.S2,self.alpha*S2+(1-self.alpha)*self.S2),
                         tf.assign(self.S3,self.alpha*S3+(1-self.alpha)*self.S3),tf.assign(self.S4,self.alpha*S4+(1-self.alpha)*self.S4),
                         tf.assign(self.S5,self.alpha*S5+(1-self.alpha)*self.S5),tf.assign(self.S6,self.alpha*S6+(1-self.alpha)*self.S6),
@@ -536,7 +541,7 @@ class ConvLayer:
         value2 = rescalor/self.sigmas2_
         if(self.update_b=='channel'): return tf.assign(self.b_,tf.ones_like(self.b_)*tf.reduce_sum(value1,[0,1],keepdims=True)/tf.reduce_sum(value2,[0,1],keepdims=True))
         return tf.assign(self.b_,tf.ones_like(self.b_)*tf.reduce_sum(value1,keepdims=True)/tf.reduce_sum(value2,keepdims=True))
-    def update_sigma(self):
+    def update_sigma(self,get_value=False):
         v1 = tf.transpose(self.S1+self.S2-2*tf.transpose(self.b_,[2,0,1])*self.S7,[1,2,0])+tf.square(self.b_)
         v2 = tf.gradients(self.sigmas2_patch_,self.sigmas2_,tf.einsum('kij,kabc->ijabc',self.S4,tf.square(self.W_))-2*tf.einsum('kijabc,kabc->ijabc',self.S3,self.W_))[0]
         u  = tf.zeros_like(self.sigmas2_)
@@ -547,6 +552,7 @@ class ConvLayer:
         v3 = tf.gradients(scalar,u)[0]
         v4 = tf.gradients(self.sigmas2_patch_,self.sigmas2_,tf.einsum('kij,kabc->ijabc',self.S6,self.W_))[0]*self.b_*2
         value = v1+v2+v3+v4
+        if(get_value): return value
         if(self.sigma_opt=='local'):     return tf.assign(self.sigmas2_,value)
         elif(self.sigma_opt=='channel'): return tf.assign(self.sigmas2_,tf.reduce_sum(value,[0,1],keepdims=True)*tf.ones([self.Iin,self.Jin,1])/(self.Iin*self.Jin))
 	elif(self.sigma_opt=='global'):  return tf.assign(self.sigmas2_,tf.fill([self.Iin,self.Jin,self.C],tf.reduce_sum(value)/(self.Iin*self.Jin*self.C)))
@@ -674,12 +680,13 @@ class PoolLayer(Layer):
         update_value = tf.nn.softmax(forward,axis=3)
 	return tf.assign(self.p_,update_value)
     def update_pi(self): return tf.assign(self.pi,self.Sp/tf.reduce_sum(self.Sp))
-    def update_sigma(self):
+    def update_sigma(self,get_value=False):
         v1 = tf.transpose(self.Sm2+self.Sv2,[1,2,0])
         v2 = -2*tf.gradients(self.sigmas2_patch_,self.sigmas2_,tf.einsum('cijrab,rab->ijabc',self.SmMp,self.W_))[0]
         v3 = tf.gradients(self.sigmas2_patch_,self.sigmas2_,tf.einsum('cijr,rab->ijabc',self.SM2v2p,tf.square(self.W_)))[0]
         v4 = tf.gradients(self.sigmas2_patch_,self.sigmas2_,tf.einsum('cijr,rab->ijabc',self.SMp,self.W_))[0]*self.b_
         value = v1+v2+v3+v4
+        if(get_value): return value
         if(self.sigma_opt=='local'):     return tf.assign(self.sigmas2_,value)
         elif(self.sigma_opt=='channel'): return tf.assign(self.sigmas2_,tf.reduce_sum(value,[0,1],keepdims=True)*tf.ones([self.Iin,self.Jin,1])/(self.Iin*self.Jin))
 	elif(self.sigma_opt=='global'):  return tf.assign(self.sigmas2_,tf.fill([self.Iin,self.Jin,self.C],tf.reduce_sum(value)/(self.Iin*self.Jin*self.C)))
@@ -725,7 +732,7 @@ class InputLayer(Layer):
 
 
 class CategoricalLastLayer(Layer):
-    def __init__(self,input_layer,R,sparsity_prior=0,sigma='local',alpha=0.5,update_b=True,init_W = tf.orthogonal_initializer(float32(1))):
+    def __init__(self,input_layer,R,sparsity_prior=0,sigma='local',alpha=0.5,update_b=True,init_W = tf.random_normal):
         self.bs                            = input_layer.bs
         self.D_in                          = prod(input_layer.output_shape[1:])
         self.input_shape,self.input_shape_,self.output_shape = input_layer.output_shape,(self.bs,self.D_in),(self.bs,1)
@@ -737,11 +744,11 @@ class CategoricalLastLayer(Layer):
 	self.sigma_opt         = sigma
 	self.sparsity_prior    = sparsity_prior
         self.input             = input_layer.m
-	self.R                 = R
+	self.R,self.K                 = R,R
 	# PARAMETERS
         self.sigmas2_= tf.Variable(tf.ones(self.D_in))
         self.sigmas2 = tf.expand_dims(self.sigmas2_,0)
-	self.W       = tf.Variable(init_W((R,self.D_in)))
+	self.W       = tf.Variable(init_W((R,self.D_in))/sqrt(self.D_in))
 	self.pi      = tf.Variable(tf.ones(R)/R)
         self.b_      = tf.Variable(tf.zeros(self.D_in))
         self.b       = tf.expand_dims(self.b_,0)
@@ -759,6 +766,8 @@ class CategoricalLastLayer(Layer):
         else:
             self.is_flat = True
             self.input_  = self.input
+    def init_W(self,W,b):
+        return tf.group(tf.assign(self.W,W),tf.assign(self.b_,b))
     def vector2tensor(self,u):
         return tf.reshape(u,self.input_shape)
     def update_S(self):
@@ -821,11 +830,12 @@ class CategoricalLastLayer(Layer):
         V       = mysoftmax(proj+m2v2+tf.log(prior),coeff=0.0)
         return tf.assign(self.p_,V*tf.expand_dims(self.mask,-1)+self.p_[0]*(1-tf.expand_dims(self.mask,-1)))
                                         ################### M STEP UPDATES
-    def update_sigma(self):
+    def update_sigma(self,get_value=False):
         C1 = tf.einsum('r,rd->d',self.Sp,tf.square(self.W))+tf.square(self.b_)+self.Sm2+self.Sv2
         C2 = -2*tf.reduce_sum(self.Spm*self.W,0)-2*self.Sm*self.b_+2*tf.einsum('r,rd->d',self.Sp,self.W*self.b)
         value = C1+C2#self.S6+self.S2-tf.reduce_sum(self.Sp*self.W,0)
         value_ = tf.clip_by_value(value,0.00000001,1000)
+        if(get_value): return value_
         if(self.sigma_opt=='local'):    return tf.assign(self.sigmas2_,value_)
         elif(self.sigma_opt=='global'): return tf.assign(self.sigmas2_,tf.fill([self.D_in],tf.reduce_sum(value_)/self.D_in))
         elif(self.sigma_opt=='none'):   return []
@@ -918,11 +928,12 @@ class ContinuousLastLayer(Layer):
         return tf.scatter_update(self.W,[self.k_],[numerator/(denominator+self.sparsity_prior)])
     def update_b(self):
         return tf.assign(self.b_,self.m-tf.einsum('kd,k->',self.W,self.M))
-    def update_sigma(self):
+    def update_sigma(self,get_value=False):
         k2 = self.Sv2+self.Sm2+tf.square(self.b_)+tf.einsum('kd,cd,kc->d',self.W,self.W,self.SMM)
         k3 = tf.einsum('d,kd,k->d',self.b_,self.W,self.SM)-tf.einsum('dk,kd->d',self.SmM,self.W)-self.Sm*self.b_
         k4 = tf.einsum('k,kd->d',self.SV2,tf.square(self.W))
         value = k2+k3*2+k4
+        if(get_value): return value
         if(self.sigma_opt=='local'):
             return tf.assign(self.sigmas2_,value)
         elif(self.sigma_opt=='global'):

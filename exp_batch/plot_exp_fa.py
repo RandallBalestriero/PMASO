@@ -12,6 +12,9 @@ SAVE_DIR = os.environ['SAVE_DIR']
 
 
 def normalize(x):
+    print x.shape
+    if(x.shape[2]==1):
+        x=x[:,:,0]
     return (x-x.min())/(x.max()-x.min())
 
 
@@ -36,7 +39,7 @@ def plotclasses(classes,samplesclass1):
 
 
 def doit(MODEL,NEURONS,pl=1):
-    f=open(SAVE_DIR+'exp_batch_5000_500_'+MODEL+'_'+NEURONS+'.pkl','rb')
+    f=open(SAVE_DIR+'exp_batch_1000_64_'+MODEL+'_'+NEURONS+'.pkl','rb')
     LOSSES,reconstruction,x,y,samples0,samples1=cPickle.load(f)
     f.close()
     LLL = []

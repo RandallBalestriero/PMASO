@@ -48,43 +48,50 @@ def doit(pred,y,K):
     return mean((yhat==y).astype('float32'))
     
 
-DATASET = 'CIFAR'
+DATASET = 'MNIST'
 
 sigmass  = 'global'
 
 MODEL    = 1
 NEURONS  = 10
 
-N = 2000
-BS =1000
+N = 128*400
+BS =128
 
-leakiness = float32(0.01)
+leakiness = float32(0.001)
 
 supss     = 0
 
-x_train,y_train,x_test,y_test = load_data(DATASET)
+x_train,y_train,x_test,y_test,Y_mask = load_data(DATASET)
 
+
+print x_train[0]
+
+
+#x_train/=sqrt(sum(x_train**2,(1,2,3),keepdims=True))
 pp = permutation(N)
-XX = x_train[pp]*1.10010#*2.1#+randn(len(pp),3,32,32)*0.0001
+XX = x_train[pp]*1.01+randn(len(pp),1,28,28)*0.000
 YY = y_train[pp]
 
-#XX = transpose(XX,[0,2,3,1])
-#x_test = transpose(x_test,[0,2,3,1])
-#input_shape = [BS,28,28,1]
-input_shape = [BS,32,32,3]
+XX = transpose(XX,[0,2,3,1])
+x_test = transpose(x_test,[0,2,3,1])
+input_shape = [BS,28,28,1]
 
+#input_shape = [BS,32,32,3]
+#
 
 
 
 
 with tf.device('/device:GPU:0'): 
     MODEL1 = [InputLayer(input_shape)]
-    MODEL1.append(ConvLayer(MODEL1[-1],K=8,Ic=5,Jc=5,R=2,leakiness=0,sparsity_prior=0.,sigma='channel',update_b='channel'))
-    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
-    MODEL1.append(ConvLayer(MODEL1[-1],K=32,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='channel',update_b='channel'))
-    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
-    MODEL1.append(DenseLayer(MODEL1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=0.,sigma='global',update_b=True))
-    MODEL1.append(CategoricalLastLayer(MODEL1[-1],R=NEURONS,sparsity_prior=.0,sigma='global',update_b=True))
+#    MODEL1.append(ConvLayer(MODEL1[-1],K=8,Ic=5,Jc=5,R=2,sparsity_prior=0.0001,sigma='channel',update_b='channel'))
+#    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
+#    MODEL1.append(ConvLayer(MODEL1[-1],K=32,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='channel',update_b='channel'))
+#    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
+    MODEL1.append(DenseLayer(MODEL1[-1],K=128,R=2,leakiness=leakiness,sparsity_prior=.00,sigma='local',update_b=True))
+    MODEL1.append(DenseLayer(MODEL1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=.00,sigma='local',update_b=True))
+    MODEL1.append(CategoricalLastLayer(MODEL1[-1],R=NEURONS,sparsity_prior=.00,sigma='local',update_b=True))
 #        layers1.append(DenseLayer(layers1[-1],K=128,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass,update_b=True))
 #        layers1.append(ConvLayer(layers1[-1],K=3,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='global'))
 #    layers1.append(PoolLayer(layers1[-1],Ic=2,Jc=2,sigma='global'))
@@ -94,7 +101,7 @@ with tf.device('/device:GPU:0'):
 
 
 
-model1 = model(MODEL1,XX)
+model1 = model(MODEL1,XX,Y_mask=Y_mask)
 
 #model2 = model(MODEL2,XX)
 
@@ -105,17 +112,17 @@ print shape(y_hat),y_hat
 CL      = doit(y_hat,YY,NEURONS)
 print CL
 time.sleep(1)
+ACCU = [CL]
 
+LOSSES  = pretrain(model1,False)
 
-LOSSES  = pretrain(model1,rcoeff_schedule=schedule(0.0001005,'linear'),alpha_schedule=schedule(0.5,'mean'),CPT=5,random=1,fineloss=0,verbose=1,per_layer=1,mp_opt=0,partial_E=0,G=False)
-
-for i in xrange(320):
-    LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(.1005,'linear'),alpha_schedule=schedule(0.5,'mean'),CPT=1,random=1,fineloss=0,verbose=1,per_layer=1,mp_opt=0,partial_E=0,PLOT=0)
+for i in xrange(620):
+    LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(.01005,'linear'),alpha_schedule=schedule(0.85,'mean'),CPT=1,random=0,fineloss=0,verbose=0,per_layer=1,mp_opt=0,partial_E=0,PLOT=0)
     y_hat1   = argmax(model1.layers_[model1.layers[-1]].p,1)
-#    CL      = acc(YY,y_hat1)#doit(y_hat1,YY,NEURONS)
-    CL      = doit(y_hat1,YY,NEURONS)
+    CL      = acc(YY,y_hat1)#doit(y_hat1,YY,NEURONS)
+#    CL      = doit(y_hat1,YY,NEURONS)
     print CL
-
+    ACCU.append(CL)
 
 
 reconstruction = model1.reconstruct()[:3000]
@@ -123,8 +130,8 @@ samplesclass0=[model1.sampleclass(0,k)[:150] for k in xrange(NEURONS)]
 samplesclass1=[model1.sampleclass(1,k)[:150] for k in xrange(NEURONS)]
 #samples1=model1.sample(1)[:3000]
 
-f=open(SAVE_DIR+'exp_batch_'+str(N)+'_'+str(BS)+'_'+str(MODEL)+'_'+str(NEURONS)+'.pkl','wb')
-cPickle.dump([LOSSES,reconstruction,XX[:3000],YY[:3000],samplesclass0,samplesclass1],f)
+f=open(SAVE_DIR+'exp_clustering2_'+str(N)+'_'+str(BS)+'_'+str(MODEL)+'_'+str(NEURONS)+'.pkl','wb')
+cPickle.dump([LOSSES,reconstruction,XX[:3000],YY[:3000],samplesclass0,samplesclass1,ACCU],f)
 f.close()
 
 
