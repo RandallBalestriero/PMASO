@@ -589,10 +589,12 @@ def train_layer_model(model,rcoeff_schedule,alpha_schedule,CPT,random=0,fineloss
 	    g=model.E_step(rcoeff=rcoeff_schedule.get(),random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt,per_layer=per_layer)
             print "\tAFTER E",model.session.run(model.KL),model.session.run(model.like0),'   gain',g,'  time:',time.time()-t
             model.save_batch(indices[batch])
-            if(alpha_schedule.opt=='mean'):  model.set_alpha(float32(alpha_schedule.get()))
-            else:                            model.set_alpha(float32(alpha_schedule.get()))
+            if(alpha_schedule.opt=='mean'):  model.set_alpha(float32(1))#alpha_schedule.get()))
+            else:                            model.set_alpha(float32(1))#alpha_schedule.get()))
             model.session.run(model.updates_S)
-#            print "AFTER UPDATE",model.session.run(model.like0),model.session.run(model.like1)
+            print "AFTER UPDATE",model.session.run(model.like0),model.session.run(model.like1)
+            print "AFTER UPDATE",model.session.run(model.like0),model.session.run(model.like1)
+            print "AFTER UPDATE",model.session.run(model.like0),model.session.run(model.like1)
             if(partial_E):
                 if(PLOT):
                     for ll in xrange(model.L-1): plot_layer(model,ll,10,1)
@@ -609,7 +611,7 @@ def train_layer_model(model,rcoeff_schedule,alpha_schedule,CPT,random=0,fineloss
             g = model.M_step(rcoeff=rcoeff_schedule.get(),random=random,fineloss=fineloss,verbose=verbose)
             LIKE.append(model.session.run(model.like1))
             print "\tAFTER M",model.session.run(model.KL),model.session.run(model.like0),LIKE[-3:],'   gain',g,'   time',time.time()-t
-            print [model.session.run(model.layers[l].sigmas2_)[0] for l in xrange(1,model.L)]
+            print [(model.session.run(model.layers[l].sigmas2_).min(),model.session.run(model.layers[l].sigmas2_).max()) for l in xrange(1,model.L)]
     return LIKE
 
 

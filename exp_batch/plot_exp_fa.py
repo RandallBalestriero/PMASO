@@ -39,7 +39,7 @@ def plotclasses(classes,samplesclass1):
 
 
 def doit(MODEL,NEURONS,pl=1):
-    f=open(SAVE_DIR+'exp_batch_1000_64_'+MODEL+'_'+NEURONS+'.pkl','rb')
+    f=open(SAVE_DIR+'exp_batch_256_256_'+MODEL+'_'+NEURONS+'.pkl','rb')
     LOSSES,reconstruction,x,y,samples0,samples1=cPickle.load(f)
     f.close()
     LLL = []
@@ -63,7 +63,7 @@ def doit(MODEL,NEURONS,pl=1):
         savefig('../BASE_EXP/BATCH/sigmass'+'_'+MODEL+'_'+NEURONS+'_reconstruction_'+str(i)+'.png')
         close()
         figure(figsize=(2,2))
-        imshow(normalize(samples0[i]),aspect='auto',interpolation='nearest')
+        imshow(normalize(samples1[i]),aspect='auto',interpolation='nearest')
         xticks([])
         yticks([])
         tight_layout()

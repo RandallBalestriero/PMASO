@@ -55,7 +55,7 @@ sigmass  = 'global'
 MODEL    = 1
 NEURONS  = 10
 
-N = 128*400
+N = 128*10
 BS =128
 
 leakiness = float32(0.001)
@@ -70,7 +70,7 @@ print x_train[0]
 
 #x_train/=sqrt(sum(x_train**2,(1,2,3),keepdims=True))
 pp = permutation(N)
-XX = x_train[pp]*1.01+randn(len(pp),1,28,28)*0.000
+XX = x_train[pp]*10.01+randn(len(pp),1,28,28)*0.000
 YY = y_train[pp]
 
 XX = transpose(XX,[0,2,3,1])
@@ -85,12 +85,12 @@ input_shape = [BS,28,28,1]
 
 with tf.device('/device:GPU:0'): 
     MODEL1 = [InputLayer(input_shape)]
-#    MODEL1.append(ConvLayer(MODEL1[-1],K=8,Ic=5,Jc=5,R=2,sparsity_prior=0.0001,sigma='channel',update_b='channel'))
-#    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
+    MODEL1.append(ConvLayer(MODEL1[-1],K=16,Ic=5,Jc=5,R=2,sparsity_prior=0.0001,sigma='channel',update_b='channel'))
+    MODEL1.append(PoolLayer(MODEL1[-1],Ic=3,Jc=2,sigma='channel'))
 #    MODEL1.append(ConvLayer(MODEL1[-1],K=32,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='channel',update_b='channel'))
 #    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
     MODEL1.append(DenseLayer(MODEL1[-1],K=128,R=2,leakiness=leakiness,sparsity_prior=.00,sigma='local',update_b=True))
-    MODEL1.append(DenseLayer(MODEL1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=.00,sigma='local',update_b=True))
+#    MODEL1.append(DenseLayer(MODEL1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=.00,sigma='local',update_b=True))
     MODEL1.append(CategoricalLastLayer(MODEL1[-1],R=NEURONS,sparsity_prior=.00,sigma='local',update_b=True))
 #        layers1.append(DenseLayer(layers1[-1],K=128,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass,update_b=True))
 #        layers1.append(ConvLayer(layers1[-1],K=3,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='global'))
@@ -114,7 +114,7 @@ print CL
 time.sleep(1)
 ACCU = [CL]
 
-LOSSES  = pretrain(model1,False)
+#LOSSES  = pretrain(model1,False)
 
 for i in xrange(620):
     LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(.01005,'linear'),alpha_schedule=schedule(0.85,'mean'),CPT=1,random=0,fineloss=0,verbose=0,per_layer=1,mp_opt=0,partial_E=0,PLOT=0)
