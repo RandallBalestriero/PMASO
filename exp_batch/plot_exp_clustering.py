@@ -31,10 +31,11 @@ def plotclasses(classes,samplesclass1):
 
 
 def doit(MODEL,NEURONS,pl=1):
-    f=open(SAVE_DIR+'exp_clustering2_'+str(128*400)+'_128_'+MODEL+'_'+NEURONS+'.pkl','rb')
+    f=open(SAVE_DIR+'exp_clustering2_'+str(256*15)+'_256_'+MODEL+'_'+NEURONS+'.pkl','rb')
     LOSSES,reconstruction,x,y,samples0,samples1,C=cPickle.load(f)
     print C
     f.close()
+    awdawd
     LLL = []
     for i in xrange(len(reconstruction)):
         LLL.append(((reconstruction[i]-x[i])**2).sum())
