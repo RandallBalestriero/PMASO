@@ -48,7 +48,7 @@ def doit(pred,y,K):
     return mean((yhat==y).astype('float32'))
     
 
-DATASET = 'STL10'
+DATASET = 'CIFAR10'
 
 sigmass  = 'global'
 
@@ -56,7 +56,7 @@ sigmass  = 'global'
 N = 64*30
 BS =64
 
-leakiness = float32(0.001)
+leakiness = None#float32(0.001)
 
 supss     = 0
 
@@ -69,10 +69,10 @@ YY = y_train[pp]
 #XX = transpose(XX,[0,2,3,1])
 #x_test = transpose(x_test,[0,2,3,1])
 #input_shape = [BS,28,28,1]
-input_shape = [BS,96,96,3]
+#input_shape = [BS,96,96,3]
 
 MODEL = int(sys.argv[-1])
-#input_shape = [BS,32,32,3]
+input_shape = [BS,32,32,3]
 
 
 
@@ -81,7 +81,7 @@ MODEL = int(sys.argv[-1])
 with tf.device('/device:GPU:0'): 
     MODEL1 = [InputLayer(input_shape)]
     if(MODEL==1):
-        MODEL1.append(ConvLayer(MODEL1[-1],K=8,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='channel',update_b='channel'))
+        MODEL1.append(ConvLayer(MODEL1[-1],K=8,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='global',update_b='channel'))
         MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
         MODEL1.append(DenseLayer(MODEL1[-1],K=256,R=2,leakiness=leakiness,sparsity_prior=0.,sigma='global',update_b=True))
         MODEL1.append(ContinuousLastLayer(MODEL1[-1],128,'global',sparsity_prior=0.0))
@@ -115,7 +115,7 @@ model1 = model(MODEL1,XX)
 #LOSSES  = pretrain(model1,rcoeff_schedule=schedule(0.0001005,'linear'),alpha_schedule=schedule(0.5,'mean'),CPT=5,random=1,fineloss=0,verbose=1,per_layer=1,mp_opt=0,partial_E=0,G=False)
 
 for i in xrange(1):
-    LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(4.5005,'linear'),alpha_schedule=schedule(0.5,'mean'),CPT=140,random=0,fineloss=0,verbose=0,per_layer=1,mp_opt=0,partial_E=0,PLOT=0)
+    LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(4.5005,'linear'),alpha_schedule=schedule(0.5,'mean'),CPT=14,random=0,fineloss=0,verbose=0,per_layer=1,mp_opt=0,partial_E=0,PLOT=0)
 #    y_hat1   = argmax(model1.layers_[model1.layers[-1]].p,1)
 #    CL      = doit(y_hat1,YY,NEURONS)
 #    print CL

@@ -49,26 +49,34 @@ def extract_patches(M,S):
 
 
 def plot_layer(model,l,n_,filters=1):
-    if(l==1):
+    if(l==0):
         figure()
-        imshow(mynormalize(model.layers_[model.layers[l-1]].m[n_]),interpolation='nearest',aspect='auto')
-    if(isinstance(model.layers[l],layers_.ConvLayer)):
+        R = model.reconstruct()
+        subplot(141)
+        imshow(mynormalize(model.layers_[model.layers[l]].m[n_,:,:,0]),interpolation='nearest',aspect='auto')
+        subplot(142)
+        imshow(mynormalize(R[0,:,:,0]),interpolation='nearest',aspect='auto')
+        subplot(143)
+        imshow(mynormalize(R[1,:,:,0]),interpolation='nearest',aspect='auto')
+        subplot(144)
+        imshow(mynormalize(R[2,:,:,0]),interpolation='nearest',aspect='auto')
+    if(isinstance(model.layers[l],layers_.ConvLayer) or isinstance(model.layers[l],layers_.AltConvLayer)):
         figure()
 #        subplot(3,model.layers[l].K,1)
 #        imshow(model.layers_[model.layers[l]].m[n_,:,:,0],interpolation='nearest',aspect='auto')
         for k in xrange(model.layers[l].K):
-            subplot(2,model.layers[l].K,1+model.layers[l].K*0+k)
+            subplot(2,model.layers[l].K,1+k)
             imshow(model.layers_[model.layers[l]].m[n_,k],interpolation='nearest',aspect='auto')
             subplot(2,model.layers[l].K,1+model.layers[l].K+k)
             imshow(model.layers_[model.layers[l]].p[n_,k,:,:,0],interpolation='nearest',aspect='auto')
         suptitle('Convolutional input and m,p variables')
         if(filters):
             figure()
-            W = model.session.run(model.layers[l].W_)
+            W = model.session.run(model.layers[l].W)
             for k in xrange(model.layers[l].K):
                 for c in xrange(model.layers[l].C):
                     subplot(model.layers[l].C,model.layers[l].K,k*model.layers[l].C+c+1)
-                    imshow(W[k,:,:,c],interpolation='nearest',aspect='auto',vmin=W.min(),vmax=W.max())
+                    imshow(W[k,0,:,:,c],interpolation='nearest',aspect='auto',vmin=W.min(),vmax=W.max())
             suptitle('Convolutional Filters')
     elif(isinstance(model.layers[l],layers_.PoolLayer)):
         figure()
@@ -76,7 +84,7 @@ def plot_layer(model,l,n_,filters=1):
             subplot(2,model.layers[l].K,1+k)
             imshow(model.layers_[model.layers[l]].m[n_,k],interpolation='nearest',aspect='auto')
             subplot(2,model.layers[l].K,1+model.layers[l].K+k)
-            imshow(model.layers_[model.layers[l]].p[n_,k,:,:,0],interpolation='nearest',aspect='auto')
+            imshow(model.layers_[model.layers[l]].p[n_,k,:,:,0,0],interpolation='nearest',aspect='auto')
         suptitle('Pooling Layer m and p')
     elif(isinstance(model.layers[l],layers_.DenseLayer)):
         if(filters):
@@ -188,8 +196,8 @@ def init_latent_variables(X,X_V2,X_MASK,Y,Y_V2,Y_MASK,layers):
             P[l].m_assign_op    = tf.assign(l.m_,tf.transpose(P[l].m_placeholder))
             P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,0,2]))
             P[l].v2_assign_op   = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder))
-        elif(isinstance(l,layers_.ConvLayer)):
-            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*1).astype('float32'),softmax(randn(N,l.K,l.I,l.J,l.R)*0.5,-1).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32')/(l.Ic*l.Jc*l.C))
+        elif(isinstance(l,layers_.ConvLayer) or isinstance(l,layers_.AltConvLayer)):
+            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*0.5/sqrt(l.K)).astype('float32'),softmax(randn(N,l.K,l.I,l.J,l.R)*0.5,-1).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32')/(l.Ic*l.Jc*l.C))
             # placeholders
             P[l].m_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
             P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J,l.R])
@@ -199,14 +207,14 @@ def init_latent_variables(X,X_V2,X_MASK,Y,Y_V2,Y_MASK,layers):
             P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,2,3,4,0]))
             P[l].v2_assign_op   = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder,[1,2,3,0]))
         elif(isinstance(l,layers_.PoolLayer)):
-            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)).astype('float32'),softmax(randn(N,l.K,l.I,l.J,l.R),-1).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32'))
+            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*0.5/sqrt(l.K)).astype('float32'),softmax(randn(N,l.K,l.I,l.J,l.Ic,l.Jc)*2,(4,5)).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32')/(l.Ic*l.Jc*l.C))
             # placeholders
             P[l].m_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
-            P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J,l.R])
+            P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J,l.Ic,l.Jc])
             P[l].v2_placeholder = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
             # assign operators
             P[l].m_assign_op    = tf.assign(l.m_,tf.transpose(P[l].m_placeholder,[1,2,3,0]))
-            P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,2,3,4,0]))
+            P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,2,3,4,5,0]))
             P[l].v2_assign_op   = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder,[1,2,3,0]))
         elif(isinstance(l,layers_.InputLayer)):
             P[l]      = latent_variable_placeholder(X,0,X_V2)
@@ -281,7 +289,7 @@ class model:
                 Y = randn(X.shape[0],layers[-1].K).astype('float32')
                 Y_mask = ones(X.shape[0],dtype='float32')
             else:                                                   
-                Y = softmax(randn(X.shape[0],layers[-1].R)*0,-1).astype('float32')
+                Y = softmax(randn(X.shape[0],layers[-1].R)*2,-1).astype('float32')
                 Y_mask = ones(X.shape[0],dtype='float32')
         else:
             if(Y_mask is None): Y_mask = zeros(X.shape[0],dtype='float32')
@@ -304,24 +312,21 @@ class model:
             ### WEIGHTS UPDATES OP
             self.updates_S       = [l.update_S() for l in layers]
     	    self.updates_BV      = [l.update_BV() for l in layers]
+            self.updates_Wk      = [l.update_Wk() for l in layers]
+            self.updates_pi      = [l.update_pi() for l in layers]
+            self.updates_BN      = [l.update_BN() for l in layers]
+            self.updates_sigma   = [l.update_sigma() for l in layers]#collect_sigmas(layers)#[l.update_sigma() for l in layers]
+            self.KLs,self.KL       = KL(layers)
+            self.like0s,self.like0 = likelihood(layers,0)
+            self.like1s,self.like1 = likelihood(layers,1)
+        with tf.device('/device:GPU:0'):
             self.updates_m       = [l.update_m() for l in layers]
             self.updates_m_pre   = [l.update_m(0,True) for l in layers]
             self.updates_p       = [l.update_p() for l in layers]
 	    self.updates_v2      = [l.update_v2() for l in layers]
             self.updates_v2_pre  = [l.update_v2(True) for l in layers]
-            self.updates_sigma   = collect_sigmas(layers)#[l.update_sigma() for l in layers]
-            self.updates_Wk      = [l.update_Wk() for l in layers]
-            self.updates_pi      = [l.update_pi() for l in layers]
-            self.updates_BN      = [l.update_BN() for l in layers]
             self.evidence        = sum([l.evidence() for l in layers])
         ## GATHER LOSSES
-            self.KLs,self.KL       = KL(layers)
-            self.like0s,self.like0 = likelihood(layers,0)
-            self.like1s,self.like1 = likelihood(layers,1)
-        # GATHER GRAD OPS
-#            self.ops_KL = tf.train.AdamOptimizer(0.1).minimize(-self.KL,var_list=tf.get_collection('LATENT'))
-#            self.ops_like1 = tf.train.AdamOptimizer(0.001).minimize(-self.like1,var_list=tf.get_collection('PARAMS'))
-        # GATHER SAMPLING
         if(not isinstance(layers[-1],layers_.ContinuousLastLayer)):
             self.samplesclass    = [sampleclass(layers,k,sigma=self.sigma) for k in xrange(layers[-1].R)]
         self.samples         = sample(layers,sigma=self.sigma)
@@ -362,9 +367,13 @@ class model:
             elif(isinstance(l,layers_.ContinuousLastLayer)):
                 self.layers_[l].m[indices]  = self.session.run(l.m_)
                 self.layers_[l].v2          = self.session.run(l.v2_)
-            else:
+            elif(isinstance(l,layers_.ConvLayer) or isinstance(l,layers_.AltConvLayer)):
                 self.layers_[l].m[indices]  = transpose(self.session.run(l.m_),[3,0,1,2])
                 self.layers_[l].p[indices]  = transpose(self.session.run(l.p_),[4,0,1,2,3])
+                self.layers_[l].v2[indices] = transpose(self.session.run(l.v2_),[3,0,1,2])
+            else:
+                self.layers_[l].m[indices]  = transpose(self.session.run(l.m_),[3,0,1,2])
+                self.layers_[l].p[indices]  = transpose(self.session.run(l.p_),[5,0,1,2,3,4])
                 self.layers_[l].v2[indices] = transpose(self.session.run(l.v2_),[3,0,1,2])
     def get_params(self):
         params = []
@@ -430,6 +439,20 @@ class model:
                                                                         self.layers[l].j_:int32(i[1])})
                     if(verbose==2): print 'M',l,self.session.run(self.KL),self.session.run(self.like0) 
             if(verbose==1): print 'MP',l,self.session.run(self.KL),self.session.run(self.like0)
+	elif(isinstance(self.layers[l],layers_.AltConvLayer)):
+            if(mp_opt==0):
+                self.session.run(updates_m[l])
+                if(verbose==2): print 'M',l,self.session.run(self.KL),self.session.run(self.like0)
+                for i in iih:
+                    self.session.run(self.updates_p[l],feed_dict={self.layers[l].k_:int32(i[0])})
+                    if(verbose==2): print 'P',l,self.session.run(self.KL),self.session.run(self.like0)
+            else:
+                for i in iih:
+                    self.session.run(self.updates_p[l],feed_dict={self.layers[l].k_:int32(i[0])})
+                    if(verbose==2): print 'P',l,self.session.run(self.KL),self.session.run(self.like0)
+                self.session.run(updates_m[l])
+                if(verbose==2): print 'M',l,self.session.run(self.KL),self.session.run(self.like0) 
+            if(verbose==1): print 'MP',l,self.session.run(self.KL),self.session.run(self.like0)
 	elif(isinstance(self.layers[l],layers_.DenseLayer)):
             if(mp_opt==0):
                 self.session.run(updates_m[l])
@@ -459,13 +482,13 @@ class model:
             self.session.run(self.updates_BV[l])
             if(verbose): print 'BV',l,self.session.run(self.like1)
             if(pretraining==False):
-                self.session.run(self.updates_sigma)#)##############################[l])
+                self.session.run(self.updates_sigma[l])#)##############################[l])
                 if(verbose): print 'SIGMA',l,self.session.run(self.like1)
             return self.session.run(self.like1)-GAIN
         # POOL LAYER
         if(isinstance(self.layers[l],layers_.PoolLayer)):
             if(pretraining==False):
-                self.session.run(self.updates_sigma)###################################[l]
+                self.session.run(self.updates_sigma[l])###################################[l]
                 if(verbose): print 'SIGMA',l,self.session.run(self.like1)
             return self.session.run(self.like1)-GAIN
         if(random==0): iih = self.layers[l].W_indices
@@ -477,15 +500,18 @@ class model:
 	    if(verbose): print 'W',l,self.session.run(self.like1)
         elif(isinstance(self.layers[l],layers_.ConvLayer)):
             for kk in iih:
-                self.session.run(self.updates_Wk[l],feed_dict={	self.layers[l].k_:int32(kk[0]),self.layers[l].r_:int32(kk[1])})#,
-#								self.layers[l].i_:int32(kk[1]),
-#								self.layers[l].j_:int32(kk[2])})
+                self.session.run(self.updates_Wk[l],feed_dict={	self.layers[l].k_:int32(kk[0]),self.layers[l].r_:int32(kk[1])})
                 if(verbose==2): print 'CW',l,self.session.run(self.like1)
 	    if(verbose==1): print 'CW',l,self.session.run(self.like1)
+        elif(isinstance(self.layers[l],layers_.AltConvLayer)):
+            for kk in iih:
+                self.session.run(self.updates_Wk[l],feed_dict={ self.layers[l].k_:int32(kk[0])})
+                if(verbose==2): print 'CW',l,self.session.run(self.like1)
+                if(verbose==1): print 'CW',l,self.session.run(self.like1)
         self.session.run(self.updates_BV[l])
         if(verbose): print 'BV',l,self.session.run(self.like1)
         if(pretraining==False):
-            self.session.run(self.updates_sigma)########################################[l])
+            self.session.run(self.updates_sigma[l])########################################[l])
             if(verbose): print 'SIGMA',l,self.session.run(self.like1)
         L = self.session.run(self.like1)
         return L-GAIN
@@ -567,8 +593,8 @@ def pretrain(model,OPT=False):
             model.session.run(model.layers[LAYERS].init_W(what,reshape(b,[-1])))
         elif(isinstance(model.layers[LAYERS],layers_.ConvLayer)):
             P = extract_patches(model.layers_[model.layers[LAYERS-1]].m,model.layers[LAYERS].Ic)
-            what,_ = PCA(P,model.layers[LAYERS].K,OPT)
-            what = what.reshape((model.layers[LAYERS].K,model.layers[LAYERS].Ic,model.layers[LAYERS].Ic,model.layers[LAYERS].C))
+            what,_ = PCA(P,model.layers[LAYERS].K*2,OPT)
+            what = what.reshape((model.layers[LAYERS].K,2,model.layers[LAYERS].Ic,model.layers[LAYERS].Ic,model.layers[LAYERS].C))
             model.session.run(model.layers[LAYERS].init_W(what))
         for kkk in [0]:#xrange(5):
 #            model.set_batch(indices[0])
@@ -604,7 +630,6 @@ def pretrain(model,OPT=False):
 def train_layer_model(model,rcoeff_schedule,alpha_schedule,CPT,random=0,fineloss=1,return_time=0,verbose=0,per_layer=0,mp_opt=0,partial_E=False,G=False,PLOT=False):
     """ mp_opt : { 0,1,2,3}, m then p, p then m, mpmpmp, pmpmpm"""
     LIKE = []
-
     for epoch in xrange(CPT):# and GAIN>0):
         if(alpha_schedule.opt=='mean'): alpha_schedule.reset()
         indices = generate_batch_indices(model.N,model.bs)
@@ -625,11 +650,14 @@ def train_layer_model(model,rcoeff_schedule,alpha_schedule,CPT,random=0,fineloss
             else:                            model.set_alpha(alpha_schedule.get())
             model.session.run(model.updates_S)
             print "AFTER UPDATE",model.session.run(model.like0),model.session.run(model.like1)
-            print "Sp",model.session.run(model.layers[-1].p_).max()
-            print "BIN",bincount(argmax(model.session.run(model.layers[-1].p_),1))
-            print "m",model.session.run(model.layers[-2].m_).min(),model.session.run(model.layers[-2].m_).max()
-            print "p",model.session.run(model.layers[-2].p)[:,:,0].min(),model.session.run(model.layers[-2].p)[:,:,0].max()
-#            print "m",model.session.run(model.layers[-3].m_).min(),model.session.run(model.layers[-3].m_).max()
+            print "m",[(model.session.run(l.m_).min(),model.session.run(l.m_).max()) for l in model.layers[:-1]]
+            try:
+                print "Sp",model.session.run(model.layers[-1].p_).max()
+                print "BIN",bincount(argmax(model.session.run(model.layers[-1].p_),1))
+                print "p",[(model.session.run(l.p_).min(),model.session.run(l.p_).max()) for l in model.layers[1:]]
+            except:
+                2
+#            print "m",model.session.run(model.layers[-2].m)[:4]
 #            print "p",model.session.run(model.layers[-3].p)[:,:,0].min(),model.session.run(model.layers[-3].p)[:,:,0].max()
             if(partial_E):
                 if(PLOT):
@@ -642,7 +670,7 @@ def train_layer_model(model,rcoeff_schedule,alpha_schedule,CPT,random=0,fineloss
                 print [(model.session.run(model.layers[l].sigmas2_).min(),model.session.run(model.layers[l].sigmas2_).max()) for l in xrange(1,model.L)]
         if(partial_E==0):
             if(PLOT):
-                for ll in xrange(model.L-1): plot_layer(model,ll,10,1)
+                for ll in xrange(2): plot_layer(model,ll,10,1)
                 show()
             t=time.time()
             g = model.M_step(rcoeff=rcoeff_schedule.get(),random=random,fineloss=fineloss,verbose=verbose)

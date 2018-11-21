@@ -55,7 +55,7 @@ sigmass  = 'global'
 MODEL    = 1
 NEURONS  = 10
 
-N = 64*6
+N = 64*10
 BS =64
 
 leakiness = None#float32(0.001)
@@ -65,12 +65,12 @@ supss     = 0
 x_train,y_train,x_test,y_test,Y_mask = load_data(DATASET)
 
 
-print x_train[0]
+#print x_train[0]
 
 
 #x_train/=sqrt(sum(x_train**2,(1,2,3),keepdims=True))
 pp = permutation(N)
-XX = x_train[pp]#+randn(len(pp),1,28,28)*0.01
+XX = x_train[pp]*1+randn(len(pp),1,28,28)*0.001
 YY = y_train[pp]
 
 XX = transpose(XX,[0,2,3,1])
@@ -85,14 +85,12 @@ input_shape = [BS,28,28,1]
 
 with tf.device('/device:GPU:0'): 
     MODEL1 = [InputLayer(input_shape)]
-    MODEL1.append(ConvLayer(MODEL1[-1],K=6,Ic=5,Jc=5,R=2,sparsity_prior=0.000,sigma='channel',update_b='channel'))
-    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
-#    MODEL1.append(ConvLayer(MODEL1[-1],K=32,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='channel',update_b='channel'))
-#    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
+    MODEL1.append(AltConvLayer(MODEL1[-1],K=5,Ic=7,Jc=7,R=2,sparsity_prior=0.0001,sigma='global',update_b=False))
+    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='local'))
 #    MODEL1.append(DenseLayer(MODEL1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=.00,sigma='global',update_b=True))
-#    MODEL1.append(DenseLayer(MODEL1[-1],K=128,R=1,leakiness=leakiness,sparsity_prior=.001,sigma='local',update_b=True))
-#    MODEL1.append(DenseLayer(MODEL1[-1],K=128,R=2,leakiness=leakiness,sparsity_prior=.00,sigma='local',update_b=False))
-    MODEL1.append(CategoricalLastLayer(MODEL1[-1],R=NEURONS,sparsity_prior=.00,sigma='local',update_b=False))
+#    MODEL1.append(DenseLayer(MODEL1[-1],K=128,R=2,leakiness=leakiness,sparsity_prior=.0001,sigma='local',update_b=True))
+#    MODEL1.append(DenseLayer(MODEL1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=.0,sigma='global',update_b=False))
+    MODEL1.append(CategoricalLastLayer(MODEL1[-1],R=NEURONS,sparsity_prior=.0001,sigma='local',update_b=False))
 #    MODEL1.append(ContinuousLastLayer(MODEL1[-1],128,'global',sparsity_prior=0.0))
 #        layers1.append(DenseLayer(layers1[-1],K=128,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass,update_b=True))
 #        layers1.append(ConvLayer(layers1[-1],K=3,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='global'))
@@ -110,7 +108,7 @@ model1 = model(MODEL1,XX,Y_mask=Y_mask)
 
 
 y_hat   = argmax(model1.layers_[model1.layers[-1]].p,1)
-print shape(y_hat),y_hat
+#print shape(y_hat),y_hat
 CL      = doit(y_hat,YY,NEURONS)
 print CL
 #time.sleep(1)
@@ -119,7 +117,7 @@ ACCU = [CL]
 #LOSSES  = pretrain(model1,0)
 
 for i in xrange(620):
-    LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(.0001005,'linear'),alpha_schedule=schedule(0.85,'mean'),CPT=1,random=1,fineloss=0,verbose=0,per_layer=1,mp_opt=0,partial_E=0,PLOT=0)
+    LOSSES  = train_layer_model(model1,rcoeff_schedule=schedule(.00001005,'linear'),alpha_schedule=schedule(0.5,'exp'),CPT=1,random=1,fineloss=0,verbose=1,per_layer=1,mp_opt=0,partial_E=0,PLOT=0)
     y_hat1   = argmax(model1.layers_[model1.layers[-1]].p,1)
     CL      = acc(YY,y_hat1)#doit(y_hat1,YY,NEURONS)
     print CL
