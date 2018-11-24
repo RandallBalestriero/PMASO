@@ -8,7 +8,12 @@ import zipfile
 from sklearn.decomposition import PCA
 from sklearn.feature_extraction.image import extract_patches_2d
 def mynormalize(x):
-    return (x-x.min())/(x.max()-x.min())
+    XX = (x-x.min())/(x.max()-x.min())
+    if(len(XX.shape)==2):
+        return XX
+    elif(XX.shape[2]==1):
+        return XX[:,:,0]
+    return XX
 
 
 def collect_sigmas(layers):
@@ -27,6 +32,8 @@ def softmax(x,axis=-1):
     m=x.max(axis=axis,keepdims=True)
     return exp(x-m)/exp(x-m).sum(axis=axis,keepdims=True)
 
+
+def sigmoid(x): return 1/(1+exp(-x))
 
 
 def PCA(X,K,opt=False):
@@ -53,38 +60,34 @@ def plot_layer(model,l,n_,filters=1):
         figure()
         R = model.reconstruct()
         subplot(141)
-        imshow(mynormalize(model.layers_[model.layers[l]].m[n_,:,:,0]),interpolation='nearest',aspect='auto')
+        imshow(mynormalize(model.layers_[model.layers[l]].m[n_]),interpolation='nearest',aspect='auto')
         subplot(142)
-        imshow(mynormalize(R[0,:,:,0]),interpolation='nearest',aspect='auto')
+        imshow(mynormalize(R[n_]),interpolation='nearest',aspect='auto')
         subplot(143)
-        imshow(mynormalize(R[1,:,:,0]),interpolation='nearest',aspect='auto')
+        imshow(mynormalize(R[0]),interpolation='nearest',aspect='auto')
         subplot(144)
-        imshow(mynormalize(R[2,:,:,0]),interpolation='nearest',aspect='auto')
+        imshow(mynormalize(R[1]),interpolation='nearest',aspect='auto')
     if(isinstance(model.layers[l],layers_.ConvLayer) or isinstance(model.layers[l],layers_.AltConvLayer)):
         figure()
 #        subplot(3,model.layers[l].K,1)
-#        imshow(model.layers_[model.layers[l]].m[n_,:,:,0],interpolation='nearest',aspect='auto')
+#        imshow(model.l4ayers_[model.layers[l]].m[n_,:,:,0],interpolation='nearest',aspect='auto')
+        W = model.session.run(model.layers[l].W_)
         for k in xrange(model.layers[l].K):
-            subplot(2,model.layers[l].K,1+k)
-            imshow(model.layers_[model.layers[l]].m[n_,k],interpolation='nearest',aspect='auto')
-            subplot(2,model.layers[l].K,1+model.layers[l].K+k)
-            imshow(model.layers_[model.layers[l]].p[n_,k,:,:,0],interpolation='nearest',aspect='auto')
-        suptitle('Convolutional input and m,p variables')
-        if(filters):
-            figure()
-            W = model.session.run(model.layers[l].W)
-            for k in xrange(model.layers[l].K):
-                for c in xrange(model.layers[l].C):
-                    subplot(model.layers[l].C,model.layers[l].K,k*model.layers[l].C+c+1)
-                    imshow(W[k,0,:,:,c],interpolation='nearest',aspect='auto',vmin=W.min(),vmax=W.max())
-            suptitle('Convolutional Filters')
+            subplot(2+model.layers[l].C,model.layers[l].K,1+k)
+            imshow(model.layers_[model.layers[l]].m[n_,k],interpolation='nearest',aspect='auto',vmin=model.layers_[model.layers[l]].m[n_].min(),vmax = model.layers_[model.layers[l]].m[n_].max())
+            subplot(2+model.layers[l].C,model.layers[l].K,1+model.layers[l].K+k)
+            imshow(model.layers_[model.layers[l]].p[n_,k],interpolation='nearest',aspect='auto',vmin=model.layers_[model.layers[l]].p[n_].min(),vmax = model.layers_[model.layers[l]].p[n_].max())
+            for c in xrange(model.layers[l].C):
+                subplot(2+model.layers[l].C,model.layers[l].K,(c+2)*model.layers[l].K+k+1)
+                imshow(W[k,:,:,c],interpolation='nearest',aspect='auto',vmin=W.min(),vmax=W.max())
+            suptitle('Convolutional input and m,p and filter variables')
     elif(isinstance(model.layers[l],layers_.PoolLayer)):
         figure()
         for k in xrange(model.layers[l].K):
             subplot(2,model.layers[l].K,1+k)
-            imshow(model.layers_[model.layers[l]].m[n_,k],interpolation='nearest',aspect='auto')
+            imshow(model.layers_[model.layers[l]].m[n_,k],interpolation='nearest',aspect='auto',vmin=model.layers_[model.layers[l]].m[n_].min(),vmax = model.layers_[model.layers[l]].m[n_].max())
             subplot(2,model.layers[l].K,1+model.layers[l].K+k)
-            imshow(model.layers_[model.layers[l]].p[n_,k,:,:,0,0],interpolation='nearest',aspect='auto')
+            imshow(model.layers_[model.layers[l]].p[n_,k,:,:,0,0],interpolation='nearest',aspect='auto',vmin=model.layers_[model.layers[l]].p[n_].min(),vmax = model.layers_[model.layers[l]].p[n_].max())
         suptitle('Pooling Layer m and p')
     elif(isinstance(model.layers[l],layers_.DenseLayer)):
         if(filters):
@@ -187,7 +190,7 @@ def init_latent_variables(X,X_V2,X_MASK,Y,Y_V2,Y_MASK,layers):
     P = dict()
     for l in layers:
         if(isinstance(l,layers_.DenseLayer)):
-            P[l]=latent_variable_placeholder((randn(N,l.K)*0.5/sqrt(l.K)).astype('float32'),softmax(randn(N,l.K,l.R)*0.5,-1).astype('float32'),ones((N,l.K),dtype='float32')/prod(l.input_shape[1:]))
+            P[l]=latent_variable_placeholder((randn(N,l.K)*1/sqrt(l.K)).astype('float32'),softmax(randn(N,l.K,l.R)*0.5,-1).astype('float32'),ones((N,l.K),dtype='float32')/prod(l.input_shape[1:]))
             # placeholders
             P[l].m_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K])
             P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.R])
@@ -197,24 +200,24 @@ def init_latent_variables(X,X_V2,X_MASK,Y,Y_V2,Y_MASK,layers):
             P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,0,2]))
             P[l].v2_assign_op   = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder))
         elif(isinstance(l,layers_.ConvLayer) or isinstance(l,layers_.AltConvLayer)):
-            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*0.5/sqrt(l.K)).astype('float32'),softmax(randn(N,l.K,l.I,l.J,l.R)*0.5,-1).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32')/(l.Ic*l.Jc*l.C))
+            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*1/sqrt(l.K)).astype('float32'),0.99*ones((N,l.K,l.I,l.J)).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32')/(l.Ic*l.Jc*l.C))
             # placeholders
             P[l].m_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
-            P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J,l.R])
+            P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
             P[l].v2_placeholder = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
             # assign operators
             P[l].m_assign_op    = tf.assign(l.m_,tf.transpose(P[l].m_placeholder,[1,2,3,0]))
-            P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,2,3,4,0]))
+            P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,2,3,0]))
             P[l].v2_assign_op   = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder,[1,2,3,0]))
         elif(isinstance(l,layers_.PoolLayer)):
-            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*0.5/sqrt(l.K)).astype('float32'),softmax(randn(N,l.K,l.I,l.J,l.Ic,l.Jc)*2,(4,5)).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32')/(l.Ic*l.Jc*l.C))
+            P[l]=latent_variable_placeholder((randn(N,l.K,l.I,l.J)*1/sqrt(l.K)).astype('float32'),softmax(randn(N,l.K,l.I,l.J,l.Ic,l.Jc,l.Dc)*1,(4,5,6)).astype('float32'),ones((N,l.K,l.I,l.J),dtype='float32')/(l.Ic*l.Jc*l.C))
             # placeholders
             P[l].m_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
-            P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J,l.Ic,l.Jc])
+            P[l].p_placeholder  = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J,l.Ic,l.Jc,l.Dc])
             P[l].v2_placeholder = tf.placeholder(tf.float32,shape=[l.bs,l.K,l.I,l.J])
             # assign operators
             P[l].m_assign_op    = tf.assign(l.m_,tf.transpose(P[l].m_placeholder,[1,2,3,0]))
-            P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,2,3,4,5,0]))
+            P[l].p_assign_op    = tf.assign(l.p_,tf.transpose(P[l].p_placeholder,[1,2,3,4,5,6,0]))
             P[l].v2_assign_op   = tf.assign(l.v2_,tf.transpose(P[l].v2_placeholder,[1,2,3,0]))
         elif(isinstance(l,layers_.InputLayer)):
             P[l]      = latent_variable_placeholder(X,0,X_V2)
@@ -277,7 +280,7 @@ def KL(layers):
 
 
 class model:
-    def __init__(self,layers,X,X_mask=None,Y_mask=None,Y=None,batch=False):
+    def __init__(self,layers,X,X_mask=None,Y_mask=None,Y=None,batch=False,sigma='unconstrained'):
         self.layers    = layers
         self.batch     = batch
         self.N         = len(X)
@@ -289,7 +292,7 @@ class model:
                 Y = randn(X.shape[0],layers[-1].K).astype('float32')
                 Y_mask = ones(X.shape[0],dtype='float32')
             else:                                                   
-                Y = softmax(randn(X.shape[0],layers[-1].R)*2,-1).astype('float32')
+                Y = softmax(randn(X.shape[0],layers[-1].R)*0.2,-1).astype('float32')
                 Y_mask = ones(X.shape[0],dtype='float32')
         else:
             if(Y_mask is None): Y_mask = zeros(X.shape[0],dtype='float32')
@@ -307,25 +310,22 @@ class model:
         session_config.gpu_options.allow_growth=True
         session        = tf.Session(config=session_config)
         self.session=session
-        with tf.device('/device:GPU:0'):
-#            self.BNBN = layers[1].BN()
             ### WEIGHTS UPDATES OP
-            self.updates_S       = [l.update_S() for l in layers]
-    	    self.updates_BV      = [l.update_BV() for l in layers]
-            self.updates_Wk      = [l.update_Wk() for l in layers]
-            self.updates_pi      = [l.update_pi() for l in layers]
-            self.updates_BN      = [l.update_BN() for l in layers]
-            self.updates_sigma   = [l.update_sigma() for l in layers]#collect_sigmas(layers)#[l.update_sigma() for l in layers]
-            self.KLs,self.KL       = KL(layers)
-            self.like0s,self.like0 = likelihood(layers,0)
-            self.like1s,self.like1 = likelihood(layers,1)
-        with tf.device('/device:GPU:0'):
-            self.updates_m       = [l.update_m() for l in layers]
-            self.updates_m_pre   = [l.update_m(0,True) for l in layers]
-            self.updates_p       = [l.update_p() for l in layers]
-	    self.updates_v2      = [l.update_v2() for l in layers]
-            self.updates_v2_pre  = [l.update_v2(True) for l in layers]
-            self.evidence        = sum([l.evidence() for l in layers])
+        self.updates_S       = [l.update_S() for l in layers]
+    	self.updates_BV      = [l.update_BV() for l in layers]
+        self.updates_Wk      = [l.update_Wk() for l in layers]
+        self.updates_pi      = [l.update_pi() for l in layers]
+        if(sigma=='universal'): self.updates_sigma = [collect_sigmas(layers)]*self.L
+        else:                   self.updates_sigma = [l.update_sigma() for l in layers]
+        self.KLs,self.KL       = KL(layers)
+        self.like0s,self.like0 = likelihood(layers,0)
+        self.like1s,self.like1 = likelihood(layers,1)
+        self.updates_m       = [l.update_m() for l in layers]
+        self.updates_m_pre   = [l.update_m(0,True) for l in layers]
+        self.updates_p       = [l.update_p() for l in layers]
+	self.updates_v2      = [l.update_v2() for l in layers]
+        self.updates_v2_pre  = [l.update_v2(True) for l in layers]
+        self.evidence        = sum([l.evidence() for l in layers])
         ## GATHER LOSSES
         if(not isinstance(layers[-1],layers_.ContinuousLastLayer)):
             self.samplesclass    = [sampleclass(layers,k,sigma=self.sigma) for k in xrange(layers[-1].R)]
@@ -345,7 +345,6 @@ class model:
             elif(isinstance(l,layers_.ContinuousLastLayer)):
                 self.session.run(self.layers_[l].m_assign_op,feed_dict={self.layers_[l].m_placeholder:self.layers_[l].m[indices]})
                 self.session.run(self.layers_[l].v2_assign_op,feed_dict={self.layers_[l].v2_placeholder:self.layers_[l].v2})
-#                self.session.run(self.layers_[l].mask_assign_op,feed_dict={self.layers_[l].mask_placeholder:self.layers_[l].mask[indices]})
             elif(isinstance(l,layers_.CategoricalLastLayer)):
                 self.session.run(self.layers_[l].p_assign_op,feed_dict={self.layers_[l].p_placeholder:self.layers_[l].p[indices]})
                 self.session.run(self.layers_[l].mask_assign_op,feed_dict={self.layers_[l].mask_placeholder:self.layers_[l].mask[indices]})
@@ -369,11 +368,11 @@ class model:
                 self.layers_[l].v2          = self.session.run(l.v2_)
             elif(isinstance(l,layers_.ConvLayer) or isinstance(l,layers_.AltConvLayer)):
                 self.layers_[l].m[indices]  = transpose(self.session.run(l.m_),[3,0,1,2])
-                self.layers_[l].p[indices]  = transpose(self.session.run(l.p_),[4,0,1,2,3])
+                self.layers_[l].p[indices]  = transpose(self.session.run(l.p_),[3,0,1,2])
                 self.layers_[l].v2[indices] = transpose(self.session.run(l.v2_),[3,0,1,2])
             else:
                 self.layers_[l].m[indices]  = transpose(self.session.run(l.m_),[3,0,1,2])
-                self.layers_[l].p[indices]  = transpose(self.session.run(l.p_),[5,0,1,2,3,4])
+                self.layers_[l].p[indices]  = transpose(self.session.run(l.p_),[6,0,1,2,3,4,5])
                 self.layers_[l].v2[indices] = transpose(self.session.run(l.v2_),[3,0,1,2])
     def get_params(self):
         params = []
@@ -419,9 +418,9 @@ class model:
             if(random==0): miih = self.layers[l].m_indices
             else:          miih = self.layers[l].m_indices[permutation(len(self.layers[l].m_indices))]
             if(mp_opt==0):
+                TT = time.time()
                 for i in miih:
-                    self.session.run(updates_m[l],feed_dict={self.layers[l].i_:int32(i[0]),
-                                                                        self.layers[l].j_:int32(i[1])})
+                    self.session.run(updates_m[l],feed_dict={self.layers[l].i_:int32(i[0]),self.layers[l].j_:int32(i[1])})
                     if(verbose==2): print 'M',l,self.session.run(self.KL),self.session.run(self.like0)
                 for i in iih:
                     self.session.run(self.updates_p[l],feed_dict={self.layers[l].i_:int32(i[1]),
@@ -473,6 +472,7 @@ class model:
         if(l==0):
             return 0
 	GAIN = self.session.run(self.like1)
+        if(verbose): print "INIT M ",GAIN
         self.session.run(self.updates_pi[l])
         if(verbose): print 'PI ',l,self.session.run(self.like1)
         # CATEGORICAL LAST LAYER
@@ -500,7 +500,7 @@ class model:
 	    if(verbose): print 'W',l,self.session.run(self.like1)
         elif(isinstance(self.layers[l],layers_.ConvLayer)):
             for kk in iih:
-                self.session.run(self.updates_Wk[l],feed_dict={	self.layers[l].k_:int32(kk[0]),self.layers[l].r_:int32(kk[1])})
+                self.session.run(self.updates_Wk[l],feed_dict={	self.layers[l].k_:int32(kk[0]),self.layers[l].i_:int32(kk[1]),self.layers[l].j_:int32(kk[2])})
                 if(verbose==2): print 'CW',l,self.session.run(self.like1)
 	    if(verbose==1): print 'CW',l,self.session.run(self.like1)
         elif(isinstance(self.layers[l],layers_.AltConvLayer)):
@@ -523,7 +523,7 @@ class model:
                 LAYER_GAIN = self.session.run(self.KL)
                 for l in xrange(self.L):
                     g_ = rcoeff+1
-                    self.session.run(self.updates_BN[l])
+#                    self.session.run(self.updates_BN[l])
                     while(g_>rcoeff):
                         g_=self.layer_E_step(l,random=random,fineloss=fineloss,verbose=verbose,mp_opt=mp_opt)
                 LAYER_GAIN = self.session.run(self.KL)-LAYER_GAIN
@@ -586,30 +586,43 @@ class model:
 
 def pretrain(model,OPT=False):
     for LAYERS in xrange(1,model.L):
+        if(LAYERS<=model.L-1):
+            if(isinstance(model.layers[LAYERS+1],layers_.PoolLayer)): continue
         indices = generate_batch_indices(model.N,model.bs)
-        if(len(model.layers[LAYERS].output_shape)==2):
-            nn   = shape(model.layers_[model.layers[LAYERS-1]].m)
-            what,b = PCA(model.layers_[model.layers[LAYERS-1]].m.reshape((nn[0],-1)),model.layers[LAYERS].K,OPT)
-            model.session.run(model.layers[LAYERS].init_W(what,reshape(b,[-1])))
-        elif(isinstance(model.layers[LAYERS],layers_.ConvLayer)):
-            P = extract_patches(model.layers_[model.layers[LAYERS-1]].m,model.layers[LAYERS].Ic)
-            what,_ = PCA(P,model.layers[LAYERS].K*2,OPT)
-            what = what.reshape((model.layers[LAYERS].K,2,model.layers[LAYERS].Ic,model.layers[LAYERS].Ic,model.layers[LAYERS].C))
-            model.session.run(model.layers[LAYERS].init_W(what))
-        for kkk in [0]:#xrange(5):
-#            model.set_batch(indices[0])
-#            model.set_alpha(1)
-#            model.session.run(model.updates_S)
-#            model.session.run(model.updates_sigma[LAYERS])
+#        if(len(model.layers[LAYERS].output_shape)==2):
+#            nn   = shape(model.layers_[model.layers[LAYERS-1]].m)
+#            what,b = PCA(model.layers_[model.layers[LAYERS-1]].m.reshape((nn[0],-1)),model.layers[LAYERS].K,OPT)
+#            model.session.run(model.layers[LAYERS].init_W(what,reshape(b,[-1])))
+#        elif(isinstance(model.layers[LAYERS],layers_.ConvLayer)):
+#            P = extract_patches(model.layers_[model.layers[LAYERS-1]].m,model.layers[LAYERS].Ic)
+#            what,_ = PCA(P,model.layers[LAYERS].K*2,OPT)
+#            what = what.reshape((model.layers[LAYERS].K,2,model.layers[LAYERS].Ic,model.layers[LAYERS].Ic,model.layers[LAYERS].C))
+#            model.session.run(model.layers[LAYERS].init_W(what))
+        print 'PRETRAINING LAYER ->',LAYERS
+        for e in xrange(10):
             for i in range(len(indices)):
                 model.set_batch(indices[i])
                 for jjj in xrange(10):
-                    g=model.layer_E_step(LAYERS,pretraining=True,verbose=0)
-#                m = model.session.run(model.layers[LAYERS].m)[:,:10]
-#                p = model.session.run(model.layers[LAYERS].p)[:,:10,0]
-#                print "m",m.min(0),m.max(0),m.std(0)
-#                print "p",p.min(0),p.max(0),p.std(0)
+                    for l in xrange(LAYERS+1):
+                        g=model.layer_E_step(l,pretraining=(l==LAYERS),verbose=0,random=True)
+#                        print 'E',g
                 model.save_batch(indices[i])
+                if(LAYERS<model.L-1):
+                    print "m",[(model.session.run(model.layers[l].m_).min(),model.session.run(model.layers[l].m_).max()) for l in xrange(1,LAYERS+1)]
+                print "p",[(model.session.run(model.layers[l].p).reshape((-1,2))[:,0].min(),model.session.run(model.layers[l].p).reshape((-1,2))[:,0].max()) for l in xrange(1,LAYERS+1)]
+                model.set_alpha(float32(1.0/(i+1)))
+                model.session.run(model.updates_S)
+            if((e+1)%3 ==0):
+                for l in xrange(LAYERS+1):
+                    plot_layer(model,l,0)
+                show()
+            for jjj in xrange(5):
+                for l in xrange(LAYERS+1):
+                    g=model.layer_M_step(l,verbose=0,random=True)
+                    print 'M',g
+            print 'SIGMA',[(model.session.run(model.layers[l].sigmas2_).min(),model.session.run(model.layers[l].sigmas2_).max()) for l in xrange(1,LAYERS+1)]
+
+
 #            model.layers_[model.layers[LAYERS]].m-=model.layers_[model.layers[LAYERS]].m.mean(0,keepdims=True)
 #            model.layers_[model.layers[LAYERS]].m/=model.layers_[model.layers[LAYERS]].m.std(0,keepdims=True)
 #            for i in range(len(indices)):
@@ -651,10 +664,10 @@ def train_layer_model(model,rcoeff_schedule,alpha_schedule,CPT,random=0,fineloss
             model.session.run(model.updates_S)
             print "AFTER UPDATE",model.session.run(model.like0),model.session.run(model.like1)
             print "m",[(model.session.run(l.m_).min(),model.session.run(l.m_).max()) for l in model.layers[:-1]]
+            print "p",[(model.session.run(l.p).reshape((-1,2))[:,0].min(),model.session.run(l.p).reshape((-1,2))[:,0].max()) for l in model.layers[1:-1]]
             try:
                 print "Sp",model.session.run(model.layers[-1].p_).max()
                 print "BIN",bincount(argmax(model.session.run(model.layers[-1].p_),1))
-                print "p",[(model.session.run(l.p_).min(),model.session.run(l.p_).max()) for l in model.layers[1:]]
             except:
                 2
 #            print "m",model.session.run(model.layers[-2].m)[:4]

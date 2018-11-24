@@ -39,7 +39,7 @@ def plotclasses(classes,samplesclass1):
 
 
 def doit(MODEL,NEURONS,pl=1):
-    f=open(SAVE_DIR+'exp_batch_256_256_'+MODEL+'_'+NEURONS+'.pkl','rb')
+    f=open(SAVE_DIR+'exp_FA_'+MODEL+'.pkl','rb')
     LOSSES,reconstruction,x,y,samples0,samples1=cPickle.load(f)
     f.close()
     LLL = []
