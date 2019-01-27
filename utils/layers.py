@@ -51,7 +51,7 @@ def mysumpool(x,p):
 
 
 
-
+# Parent class of all the layers implementing the base methods
 class Layer:
     def init_W(self):
         return []

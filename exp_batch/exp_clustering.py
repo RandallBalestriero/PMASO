@@ -50,11 +50,9 @@ def doit(pred,y,K):
 
 DATASET = 'CIFAR'
 
-sigmass  = 'global'
-
 NEURONS  = 10
 
-N = 64*2
+N = 64*30
 BS =64
 
 
@@ -77,56 +75,41 @@ input_shape = [BS,32,32,3]
 
 
 modelnb = int(sys.argv[-3])
+
 if(int(sys.argv[-2])):
     EM = True
 else:
     EM = False
+
 sigma   = sys.argv[-1]
 
 with tf.device('/device:GPU:0'): 
     MODEL1 = [InputLayer(input_shape)]
     if(modelnb==0):
-        MODEL1.append(ConvLayer(MODEL1[-1],K=12,Ic=5,Jc=5,R=1,leakiness=0.0,sparsity_prior=0.000,sigma='global',update_b='channel'))
+        MODEL1.append(ConvLayer(MODEL1[-1],K=12,Ic=5,Jc=5,R=1,leakiness=0.0,sparsity_prior=0.000,sigma='global',update_b=False))
         MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,Dc=1,sigma='channel'))
     elif(modelnb==1):
-        MODEL1.append(ConvLayer(MODEL1[-1],K=12,Ic=5,Jc=5,R=2,leakiness=0.0,sparsity_prior=0.000,sigma='global',update_b='channel'))
+        MODEL1.append(ConvLayer(MODEL1[-1],K=12,Ic=5,Jc=5,R=2,leakiness=0.0,sparsity_prior=0.000,sigma='global',update_b=False))
         MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,Dc=1,sigma='channel'))
-        MODEL1.append(ConvLayer(MODEL1[-1],K=32,Ic=3,Jc=3,R=2,leakiness=0.0,sigma='channel',update_b='channel'))
+        MODEL1.append(ConvLayer(MODEL1[-1],K=32,Ic=3,Jc=3,R=2,leakiness=0.0,sigma='channel',update_b=False))
         MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
     elif(modelnb==2):
-        MODEL1.append(ConvLayer(MODEL1[-1],K=12,Ic=5,Jc=5,R=2,leakiness=0.0,sparsity_prior=0.000,sigma='global',update_b='channel'))
+        MODEL1.append(ConvLayer(MODEL1[-1],K=12,Ic=5,Jc=5,R=2,leakiness=0.0,sparsity_prior=0.000,sigma='global',update_b=False))
         MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,Dc=1,sigma='channel'))
-        MODEL1.append(ConvLayer(MODEL1[-1],K=32,Ic=3,Jc=3,R=2,leakiness=0.0,sigma='channel',update_b='channel'))
+        MODEL1.append(ConvLayer(MODEL1[-1],K=32,Ic=3,Jc=3,R=2,leakiness=0.0,sigma='channel',update_b=False))
         MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
-        MODEL1.append(ConvLayer(MODEL1[-1],K=64,Ic=1,Jc=1,R=2,leakiness=0.0,sigma='channel',update_b='channel'))
+        MODEL1.append(ConvLayer(MODEL1[-1],K=64,Ic=1,Jc=1,R=2,leakiness=0.0,sigma='channel',update_b=False))
         MODEL1.append(PoolLayer(MODEL1[-1],Ic=1,Jc=1,Dc=2,sigma='channel'))
-#    MODEL1.append(ConvLayer(MODEL1[-1],K=128,Ic=1,Jc=1,R=2,leakiness=0.0,sigma='channel',update_b='channel'))
-#    MODEL1.append(PoolLayer(MODEL1[-1],Ic=2,Jc=2,sigma='channel'))
-#    MODEL1.append(DenseLayer(MODEL1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=.00,sigma='global',update_b=True))
-#    MODEL1.append(DenseLayer(MODEL1[-1],K=128,R=2,leakiness=leakiness,sparsity_prior=.0001,sigma='local',update_b=True))
-#    MODEL1.append(DenseLayer(MODEL1[-1],K=256,R=2,leakiness=0.00,sparsity_prior=0.00001,sigma='global',update_b=False))
-    MODEL1.append(CategoricalLastLayer(MODEL1[-1],R=NEURONS,sparsity_prior=.00,sigma='local',update_b=True))
-#    MODEL1.append(ContinuousLastLayer(MODEL1[-1],128,'global',sparsity_prior=0.0))
-#        layers1.append(DenseLayer(layers1[-1],K=128,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass,update_b=True))
-#        layers1.append(ConvLayer(layers1[-1],K=3,Ic=3,Jc=3,R=2,leakiness=0,sparsity_prior=0.,sigma='global'))
-#    layers1.append(PoolLayer(layers1[-1],Ic=2,Jc=2,sigma='global'))
-#    layers1.append(DenseLayer(layers1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass,update_b=True,G=False))
-#    layers1.append(DenseLayer(layers1[-1],K=64,R=2,leakiness=leakiness,sparsity_prior=0.001,sigma=sigmass,update_b=True,G=False))
-#    layers1.append(DenseLayer(layers1[-1],K=32,R=2,leakiness=leakiness,sparsity_prior=0.00,sigma=sigmass,update_b=True,G=False))
+    MODEL1.append(CategoricalLastLayer(MODEL1[-1],R=NEURONS,sparsity_prior=.0001,sigma='local',update_b=False))
 
 
 
 model1 = model(MODEL1,XX,Y_mask=Y_mask,sigma=sigma)
 
-#model2 = model(MODEL2,XX)
-
-
 
 y_hat   = argmax(model1.layers_[model1.layers[-1]].p,1)
-#print shape(y_hat),y_hat
 CL      = doit(y_hat,YY,NEURONS)
 print CL
-#time.sleep(1)
 ACCU = [CL]
 
 #LOSSES  = pretrain(model1,0)
