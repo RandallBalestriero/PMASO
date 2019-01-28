@@ -55,6 +55,32 @@ def mysumpool(x,p):
 class Layer:
     def init_W(self):
         return []
+    def kwargs_init(self,kwargs):
+	keys  = kwargs.keys()
+	items = kwargs.items()
+	# update_b (bool) is True of False
+	if('update_b' in keys): self.update_b = kwargs['update_b']
+	else:                   self.update_b = True
+	# sparsity_prior (float32) is a positive number
+	if('sparsity_prior' in keys): self.sparsity_prior = kwargs['sparsity_prior']
+	else:			      self.sparsity_prior = float32(0.0)
+	# init_b and init_W (func) can be any initializer instance
+	if('init_b' in keys): self.init_b = kwargs['init_b']
+	else:		      self.init_b = tf.zeros
+	if('init_W' in keys): self.init_W = kwargs['init_W']
+	else:		      self.init_W = tf.glorot_normal_initializer()
+	# sigma (str) can either be 'diagonal' or 'isotropic'
+	if('sigma_opt' in keys): self.sigma_opt = kwargs['sigma_opt']
+	else:			 self.sigma_opt = 'diagonal'
+	# init_m_data any numpy func
+        if('init_m_data' in keys): self.init_m_data = kwargs['init_m_data']
+        else:                      self.init_m_data = ones
+        # init_v2_data any numpy func
+        if('init_v2_data' in keys): self.init_v2_data = kwargs['init_v2_data']
+        else:                       self.init_v2_data = ones
+        # init_p_data any numpy func
+        if('init_p_data' in keys): self.init_p_data = kwargs['init_p_data']
+        else:                      self.init_p_data = ones
     def update_BN(self):
         return []
     def BN(self):
@@ -79,6 +105,8 @@ class Layer:
         return []
     def update_S(self):
         return []
+    def likelihood(self,E_step=True):
+	return float32(0)
 
 #########################################################################################################################
 #
@@ -91,192 +119,112 @@ class Layer:
 
 
 class DenseLayer(Layer):
-    def __init__(self,input_layer,K,R,sparsity_prior = 0,leakiness=None,sigma='local',p_drop=0,residual=0,alpha=0.95,update_b=True,init_W=tf.glorot_uniform_initializer()):
-        self.update_b       = update_b
-        self.leakiness      = leakiness
-        self.alpha          = tf.Variable(alpha,trainable=False)
-	self.sigma_opt      = sigma
-	self.residual       = residual
-        self.sparsity_prior = sparsity_prior
-        self.input_layer    = input_layer
-	self.p_drop         = float32(p_drop)
+    def __init__(self,input_layer,K,**kwargs):
+	self.kwargs_init(kwargs)
+        self.input_layer       = input_layer
         input_layer.next_layer = self
-        self.input_shape       = input_layer.output_shape
-        self.bs,self.R,self.K  = self.input_shape[0],R,K
-        self.D_in              = prod(self.input_shape[1:])
-        self.input_shape_      = (self.bs,self.D_in)#potentially different if flattened
-        self.output_shape      = (self.bs,K)
-        self.input             = input_layer.m
-        # PARAMETERS
-        self.gamma_ = tf.Variable(tf.ones(self.K))
-	self.drop_   = tf.Variable(tf.ones((self.K,2,self.bs))*tf.reshape(tf.one_hot(1,2),[1,2,1]),trainable=False)
-        self.sigmas2_= tf.Variable(tf.ones(self.D_in))
-        self.sigmas2 = tf.expand_dims(self.sigmas2_,0)
-        init_W = tf.random_normal#init_W(float32(1))
-        if(leakiness is None):
-            self.W_  = tf.Variable(init_W((K,R,self.D_in)))#(randint(0,2,K*R*self.D_in).reshape(K,R,self.D_in)*randn(K,R,self.D_in)*2/sqrt(prod(self.input_shape[1:]))).astype('float32'))
-            self.W   = self.W_*myexpand(self.gamma_,[1,1])
-        else:
-            self.W_  = tf.Variable(init_W((K,1,self.D_in)))#/sqrt(K+prod(self.input_shape[1:])))
-            self.W   = tf.concat([self.W_,self.W_*self.leakiness],axis=1)
-	self.pi      = tf.Variable(tf.ones((K,R))/R)
-	self.b_      = tf.Variable(tf.zeros(self.D_in))
-	self.b       = tf.expand_dims(self.b_,0)
-        self.V_      = tf.Variable(tf.zeros(self.K))
-        self.V       = tf.expand_dims(self.V_,0)
-        # VI PARAMETERS
-	self.m_      = tf.Variable(tf.zeros((K,self.bs)))
-        self.m       = tf.transpose(self.m_)
-        self.p_      = tf.Variable(tf.zeros((K,self.bs,R)))
-        self.p       = tf.transpose(self.p_,[1,0,2])    
-        self.v2_     = tf.Variable(tf.zeros((K,self.bs)))
-        self.v2      = tf.transpose(self.v2_,[1,0])
-        # BN PARAMETERS
-#        self.mu_ = tf.Variable(tf.zeros(self.D_in))
-#        self.mu  = tf.expand_dims(self.mu_,0)
-#        self.gamma_ = tf.Variable(tf.ones(self.K))
-	# placeholder for update and indices
-        self.k_      = tf.placeholder(tf.int32)                                 # placeholder that will indicate which neuron is being updated
-	self.W_indices = asarray(range(self.K))
-        self.p_indices = self.W_indices
-        # STATISTICS
-        self.SMpm  = tf.Variable(tf.zeros((self.K,self.R,self.D_in)))
-        self.SMp   = tf.Variable(tf.zeros((self.K,self.R)))
-        self.SM2V2 = tf.Variable(tf.zeros((self.K,self.R)))
-        self.Sv2   = tf.Variable(tf.zeros(self.D_in))
-        self.SMpMp = tf.Variable(tf.zeros((self.K,self.R,self.K,self.R)))
-        self.Sm    = tf.Variable(tf.zeros(self.D_in))
-        self.Sp    = tf.Variable(tf.zeros((self.K,self.R)))
-        self.Sm2   = tf.Variable(tf.zeros(self.D_in))
-        self.apodization = 1
-	# RESHAPE IF NEEDED
+	self.N                 = input_layer.N
+        # RESHAPE IF NEEDED (acting as a flatten layer)
         if(len(self.input_shape)>2):
-            self.is_flat = False
-            self.input_  = tf.reshape(self.input,(self.bs,self.D_in))
+            self.is_flat     = False
+            self.D           = prod(self.input_shape[1:])
+            self.input_shape = (self.input_shape[0],self.D)#potentially different if flattened
+            self.input       = tf.reshape(self.input_layer.m,self.input_shape)
         else:
-            self.is_flat = True
-            self.input_  = self.input
-    def init_W(self,W,b):
-        if(self.leakiness is not None):  return tf.group(tf.assign(self.W_,W[:,newaxis,:]),tf.assign(self.b_,b))
-        else: return tf.group(tf.assign(self.W_,concatenate([W[:,newaxis,:],randn(self.K,self.R-1,self.D_in)*norm(W[0],2)/sqrt(self.D_in)],1)),tf.assign(self.b_,b))
-    def vector2tensor(self,u):  return tf.reshape(u,self.input_shape)
-    def update_BN(self):
-        return []
-        alpha = 0.8
-        mu    = tf.reduce_sum(self.m_,1,keepdims=True)/self.bs#+(1-alpha)*self.mu_
-        return tf.assign(self.gamma_,alpha*(tf.sqrt(tf.reduce_sum(tf.square(self.m_-mu),1)/self.bs)+0.001)+(1-alpha)*self.gamma_)
+            self.is_flat     = True
+            self.D           = self.input_shape[-1]
+            self.input_shape = (self.input_shape[0],self.D)#potentially different if flattened
+            self.input       = self.input
+        self.output_shape      = (self.input_shape[0],K)
+        # THETA PARAMETERS that are updated during the M step
+        self.sigmas2 = tf.Variable(tf.ones(self.D))
+        self.W       = tf.Variable(self.init_W((K,self.D)))
+	self.b       = tf.Variable(self.init_b(K))
+        # THETAQ VARIABLES (Variational Inference) PARAMETERS that are updated during the (VI) E-step
+	self.m       = tf.Variable(tf.zeros((self.input_shape[0],K)))
+        self.v2      = tf.Variable(tf.zeros((K)))
+        # THETAQ DATA for all the dataset, as opposed to the variables which have the size of the batch
+	# only need for m as v2 is the same across data (n invariant)
+        self.m_data           = self.init_m_data((self.N,K)).astype('float32')
+	self.m_placeholder    = tf.placeholder(tf.float32,(self.input_shape[0],K))
+	self.thetaq_assign_op = tf.assign(self.m,self.m_placeholder)
+	# placeholder for update and indices (to update the parameter self.W, 1 dimension at a time)
+        self.k_        = tf.placeholder(tf.int32) # placeholder that will indicate which unit k is being updated
+	self.W_indices = asarray(range(K))        # python list of the unit to be updated to complete a cycle
+        # LAYER STATISTICS (all the statistics are init at 0 as they are init and updated externally
+	self.alpha  = tf.Variable(tf.zeros(1))    # use to compute the geometric mean for the statistics update
+        self.Sm2    = tf.Variable(tf.zeros(self.D))
+        self.Sv2    = tf.Variable(tf.zeros(self.D))
+        self.Sm     = tf.Variable(tf.zeros(self.D))
+        self.SM     = tf.Variable(tf.zeros(self.K))
+	self.SMm    = tf.Variable(tf.zeros(self.K,self.D))
+        self.SMM    = tf.Variable(tf.zeros(self.K,self.K))
+    def set_batch(self,session,indices):
+	if(len(indices)==self.N): return
+	session.run(self.thetaq_assign_op,feed_dict={self.m_placeholder:self.m_data[indices]})
+    def save_batch(self,session,indices):
+        if(len(indices)==self.N): return
+        self.m_data[indices] = session.run(self.m)
     def update_S(self):
-        mp    = tf.expand_dims(self.m_,-1)*self.p_
-        SMpm  = tf.reduce_sum(tf.expand_dims(tf.expand_dims(self.m_,2)*self.p_,-1)*myexpand(self.input_,[0,-2]),1)/self.bs
-        SMp   = tf.reduce_sum(mp,1)/self.bs
-        SM2V2 = tf.reduce_sum(tf.expand_dims(tf.square(self.m_)+self.v2_,-1)*self.p_,1)/self.bs
-        if(self.is_flat):
-            Sv2 = tf.reduce_sum(self.input_layer.v2_,1)/self.bs  
-            Sm  = tf.reduce_sum(self.input_layer.m_,1)/self.bs
-        else:
-            Sv2 = tf.reshape(tf.reduce_sum(self.input_layer.v2,0),[self.D_in])/self.bs
-            Sm  = tf.reshape(tf.reduce_sum(self.input_layer.m,0),[self.D_in])/self.bs
-        SMpMp = (1-tf.reshape(tf.eye(self.K),[self.K,1,self.K,1]))*tf.reduce_sum(myexpand(tf.transpose(mp,[0,2,1]),[-1,-1])*myexpand(tf.transpose(mp,[1,0,2]),[0,0]),2)/self.bs
-        Sp    = tf.reduce_sum(self.p_,1)/self.bs
-        Sm2   = tf.reduce_sum(tf.square(self.input_),0)/self.bs
-        return tf.group(tf.assign(self.SMpm,self.alpha*SMpm+(1-self.alpha)*self.SMpm),tf.assign(self.SMp,self.alpha*SMp+(1-self.alpha)*self.SMp),
-                        tf.assign(self.SM2V2,self.alpha*SM2V2+(1-self.alpha)*self.SM2V2),tf.assign(self.Sv2,self.alpha*Sv2+(1-self.alpha)*self.Sv2),
-                        tf.assign(self.SMpMp,self.alpha*SMpMp+(1-self.alpha)*self.SMpMp),tf.assign(self.Sm,self.alpha*Sm+(1-self.alpha)*self.Sm),
-                        tf.assign(self.Sp,self.alpha*Sp+(1-self.alpha)*self.Sp),tf.assign(self.Sm2,self.alpha*Sm2+(1-self.alpha)*self.Sm2))
-    def backward(self,flat=1,resi=None):
-	if(resi is None): resi = self.residual
-	else: resi = resi*self.residual
-	back = tf.reduce_sum(tf.matmul(self.p_*tf.expand_dims(self.m_*self.drop_[:,1],-1),self.W),0)#(k n r)x(k r d) -> k n d -> n d
-	if(flat):
-	    if(resi): return back+self.V*self.m
-	    else:     return back
+	# given the current value of the THETAQ parameters, update
+	# the values of the sufficient statistics of the layer
+        Sm2    = tf.reduce_sum(tf.square(self.input),0)/self.input_shape[0]
+	if(not isinstance(self.input_layer,NonlinearityLayer)):
+            Sv2    = tf.reshape(self.input_layer.v2,self.input_shape)
 	else:
-	    if(resi): return tf.reshape(back+self.V*self.m,self.input_shape)
-	    else:     return tf.reshape(back,self.input_shape)
-    def backwardmk(self,k,with_m=1,m=None,p=None):
-	if(m is None): m = self.m_
-	if(p is None): p = self.p_
-        AA = p*tf.expand_dims(m*self.drop_[:,1]*tf.expand_dims(1-tf.one_hot(k,self.K),-1),-1)
-	back = tf.reduce_sum(tf.matmul(AA,self.W),0)
-	if(self.residual==0): return back
-	if(with_m):           return back+self.V*tf.transpose(m)
-	else:                 return back+self.V*tf.transpose(m)*tf.expand_dims(1-tf.one_hot(k,self.K),0)
-    def sample(self,M,K=None,sigma=1,deterministic=False):
-	if(isinstance(self.input_layer,InputLayer)):sigma=0
-	if(deterministic):    return tf.reshape(self.backward(1)+self.b,self.input_shape)
-	noise = sigma*tf.random_normal((self.bs,self.D_in))*tf.sqrt(self.sigmas2)
-	if(self.p_drop>0): dropout = tf.distributions.Bernoulli(probs=self.p_drop,dtype=tf.float32).sample((self.bs,self.K))
-	else:              dropout = float32(1)
-        if(K is None): K = tf.one_hot(tf.transpose(tf.multinomial(tf.log(self.pi),self.bs)),self.R)
-	MdropK = tf.reduce_sum(tf.matmul(tf.transpose(tf.expand_dims(M*dropout,-1)*K,[1,0,2]),self.W),0)
-	if(self.residual): return tf.reshape(MdropK+noise+self.residual*self.V*M+self.b,self.input_shape)
-	else:              return tf.reshape(MdropK+self.b+noise,self.input_shape)
-    def evidence(self):
-	if(self.residual): 
-    	    currentv2 = -tf.einsum('kn,k->n',self.v2_,tf.square(self.V_)/self.sigmas2_)*float32(0.5)
-	    extra_v2  = -tf.einsum('kn,knr,rk,k->n',self.v2_,self.p_,tf.map_fn(lambda r:tf.diag_part(self.W[:,r,:]),tf.range(self.R,dtype=tf.int32),dtype=tf.float32),self.V_/self.sigmas2_)
-	else:   currentv2 = 0 ; extra_v2 = 0
-	if(self.p_drop>0): k1  = tf.reduce_sum(self.drop_[:,0],0)*tf.log(self.p_drop)+tf.reduce_sum(self.drop_[:,1],0)*tf.log(float32(1)-self.p_drop)
-	else:              k1 = 0
-        k2  = -tf.reduce_sum(tf.log(self.sigmas2_))*float32(0.5)                            #(1)
-        k3  = tf.reduce_sum(self.p_*tf.expand_dims(tf.log(self.pi),1),[0,2])                                #(n)
-	k4  = -float32(self.D_in)*tf.log(2*PI_CONST)*float32(0.5)
-        reconstruction    = -tf.einsum('nd,d->n',tf.square(self.input_-self.b-self.backward(flat=1,resi=1)),1/self.sigmas2_)*float32(0.5)                    #(1)
-	if(isinstance(self.input_layer,DenseLayer)): 
-	    input_v2  = -tf.einsum('dn,d->n',self.input_layer.v2_,1/self.sigmas2_)*float32(0.5)  #(1)
-	else:   input_v2  = -tf.reduce_sum(tf.reshape(self.input_layer.v2,[self.bs,self.D_in])/self.sigmas2,1)*float32(0.5) #(1)
-        sum_norm_k      = tf.einsum('kdn,d->n',tf.square(tf.einsum('krd,knr,kn->kdn',self.W,self.p_,self.m_*self.drop_[:,1])),1/self.sigmas2_)*float32(0.5)
-        m2v2   = -tf.reduce_sum(self.drop_[:,1]*(self.v2_+tf.square(self.m_))*tf.einsum('knr,krd,d->kn',self.p_,tf.square(self.W),1/self.sigmas2_),0)*float32(0.5)
-        return k1+k2+k3+k4+(reconstruction+input_v2+sum_norm_k+m2v2+currentv2+extra_v2)
-    def likelihood(self,batch=None,pretraining=False):
-        if(batch==False):
-#            if(self.residual):
-#                currentv2 = -tf.einsum('kn,k->',self.v2_,tf.square(self.V_)*0.5/self.sigmas2_)/self.bs
-#                extra_v2  = -tf.einsum('kn,knr,rk,k->',self.v2_,self.p_,tf.map_fn(lambda r:tf.diag_part(self.W[:,r,:]),tf.range(self.R,dtype=tf.int32),dtype=tf.float32),self.V_/self.sigmas2_)/self.bs
-#            else:currentv2 = 0 ; extra_v2 = 0
-#            if(self.p_drop>0): k1 = tf.reduce_sum(self.drop_[:,0])*tf.log(self.p_drop)/self.bs+tf.reduce_sum(self.drop_[:,1])*tf.log(float32(1)-self.p_drop)/self.bs
-#            else:              k1 = float32(0)
-            k1  = -tf.log(2*PI_CONST)*float32(self.D_in*0.5)-tf.reduce_sum(tf.log(self.sigmas2_))*float32(0.5)+tf.reduce_sum(tf.reduce_sum(self.p_,1)*tf.log(self.pi))/self.bs
-            k2  = -tf.reduce_sum(tf.square(self.input_-self.b-self.backward(flat=1,resi=1))/self.sigmas2)*float32(0.5/self.bs)
-            if(self.is_flat): k3 = -tf.reduce_sum(tf.reduce_sum(self.input_layer.v2,0)/self.sigmas2_)*float32(0.5/self.bs)  #(1)
-            else:             k3 = -tf.reduce_sum(tf.reshape(tf.reduce_sum(self.input_layer.v2,0),[self.D_in])/self.sigmas2_)*float32(0.5/self.bs) #(1)
-            k41 = tf.matmul(self.W,tf.transpose(self.W/tf.expand_dims(self.sigmas2,0),[0,2,1])) # (k r r)
-            mp  = tf.expand_dims(self.m_*self.drop_[:,1],-1)*self.p_ #(k n r)
-            k42 = tf.matmul(tf.transpose(mp,[0,2,1]),mp)/self.bs # (k r r)
-            k4  = tf.reduce_sum(k42*k41)*0.5
-#            k4  = tf.einsum('kdn,d->',tf.square(tf.einsum('krd,knr->kdn',self.W,self.p_*tf.expand_dims(self.m_*self.drop_[:,1],-1))),0.5/self.sigmas2_)/self.bs
-            k5  = -tf.reduce_sum(tf.reduce_sum(tf.expand_dims(self.drop_[:,1]*(self.v2_+tf.square(self.m_)),-1)*self.p_,1)*tf.reduce_sum(tf.square(self.W)/tf.expand_dims(self.sigmas2,0),2))*0.5/self.bs
-            return k1+k2+k3+k4+k5-self.sparsity_prior*tf.reduce_sum(tf.square(self.W))*0.5
-#K1 K5 BON
+            Sv2    = tf.reshape(tf.reduce_sum(self.input_layer.v2,0)/self.input_shape[0],self.input_shape)
+        Sm     = tf.reduce_sum(self.input,0)/self.input_shape[0]
+        SM     = tf.reduce_sum(self.m,0)/self.input_shape[0]
+        SMm    = tf.matmul(self.m,self.input,transpose_a=True)/self.input_shape[0]
+        SMM    = tf.matmul(self.m,self.m,transpose_a=True)/self.input_shape[0]
+        return tf.group(tf.assign(self.Sm2,self.alpha*Sm2+(1-self.alpha)*self.Sm2),tf.assign(self.Sv2,self.alpha*Sv2+(1-self.alpha)*self.Sv2),
+                        tf.assign(self.Sm,self.alpha*Sm+(1-self.alpha)*self.Sm),tf.assign(self.SM,self.alpha*SM+(1-self.alpha)*self.SM),
+                        tf.assign(self.SMm,self.alpha*SMm+(1-self.alpha)*self.SMm),tf.assign(self.SMM,self.alpha*SMM+(1-self.alpha)*self.SMM))
+    def backward(self,flat=0):
+	# produces the backward operation given current parameters and VI parameters
+	# return a tensor of shape self.input_shape (if flat==1) or self.input_layer.output_shape (if flat==0)
+	back = tf.matmul(self.m,self.W)+tf.expand_dims(self.b,0) #(N K).(K D) -> (N D)
+	if(flat or self.is_flat): return back
+	else:     return tf.reshape(back,self.input_layer.output_shape)
+    def sample(self,M,sigma_multiplier=1):
+	# given the next layer generated sample (which will be in place of the current variable self.m)
+	# generate the input os this layer by multiplying by the matrix self.W, adding the bias self.b and 
+	# a random noise based on self.sigmas2
+	# return a tensor of shape self.input_layer.m
+	if(isinstance(self.input_layer,InputLayer)):sigma_multiplier = 0
+	noise = sigma_multiplier*tf.random_normal(self.input_shape)*tf.expand_dims(tf.sqrt(self.sigmas2),0)
+	output = tf.matmul(M,self.W)+tf.expand_dims(self.b,0)+noise
+	if(self.is_flat): return output
+	else:		  return tf.reshape(output,self.input_layer.output_shape)
+    def likelihood(self,E_step=True):
+        constant        = -tf.log(2*PI_CONST)*float32(self.D_in*0.5)-tf.reduce_sum(tf.log(self.sigmas2))*float32(0.5)
+        if(E_step):
+            reconstruction  = -tf.reduce_sum(tf.square(self.input-self.backward(flat=1))/tf.expand_dims(self.sigmas2,0))
+            v2              = -tf.reduce_sum(self.v2/self.next_layer.sigmas2)
+            extra           = -tf.reduce_sum(self.v2*tf.reduce_sum(tf.square(self.W)/tf.expand_dims(self.sigmas2,0),1))
+            return constant+(reconstruction+v2+extra)*float32(0.5/self.input_shape[0])-self.sparsity_prior*tf.reduce_sum(tf.square(self.W))*0.5
         else:
-            k1 = -tf.log(2*PI_CONST)*float32(self.D_in*0.5)-tf.reduce_sum(tf.log(self.sigmas2_)*float32(0.5))+tf.reduce_sum(tf.log(self.pi)*self.Sp)
-            k2 = -tf.reduce_sum((self.Sm2+self.Sv2+tf.square(self.b_)-2*self.b_*self.Sm)/(2*self.sigmas2_))
-            k3 = tf.reduce_sum((self.SMpm-tf.expand_dims(self.SMp,-1)*tf.expand_dims(self.b,0))*self.W/tf.expand_dims(self.sigmas2,0))
-            W  = tf.reshape(self.W,(self.K*self.R,self.D_in))
-            k4 = -tf.reduce_sum(tf.reshape(self.SMpMp,(self.K*self.R,self.K*self.R))*tf.matmul(W,W/(2*self.sigmas2),transpose_b=True))
-            k5 = -tf.reduce_sum(self.SM2V2*tf.reduce_sum(tf.square(self.W)*0.5/tf.expand_dims(self.sigmas2,0),2))
-            return k1+k2+k3+k4+k5-self.sparsity_prior*tf.reduce_sum(tf.square(self.W))*0.5
+            k1 = -tf.reduce_sum((self.Sm2+self.Sv2+tf.square(self.b)-2*self.b*self.Sm)/(2*self.sigmas2))
+            k2 = tf.reduce_sum(self.SMm*self.W/tf.expand_dims(self.sigmas2,0))
+	    k3 = -0.5*tf.reduce_sum(tf.matmul(self.W/tf.expand_dims(self.sigmas2,0),self.W,transpose_b=True)*self.SMM)
+	    k4 = -0.5*tf.reduce_sum(self.Sv2*tf.reduce_sum(tf.square(self.W)/tf.expand_dims(self.sigmas2,0),1))
+            return constant+k1+k2+k3+k4-self.sparsity_prior*tf.reduce_sum(tf.square(self.W))*0.5
     def KL(self,pretraining=False):
-	if(self.p_drop>0): return self.likelihood(0)+(-tf.reduce_sum(self.p_*tf.log(self.p_+eps))+tf.reduce_sum(tf.log(self.v2_+eps))*float32(0.5)\
-			-tf.reduce_sum(self.drop_*tf.log(self.drop_+eps)))/float32(self.bs)+float32(self.D_in/2.0)*tf.log(2*PI_CONST)
-	else: return self.likelihood(0)+(-tf.reduce_sum(self.p_*tf.log(self.p_+eps))+tf.reduce_sum(tf.log(self.v2_+eps))*float32(0.5))/float32(self.bs)+float32(self.D_in/2.0)*tf.log(2*PI_CONST)
-                                                            ################### E STEP VARIABLES
-    def update_v2(self,pretraining=False):
-        if(pretraining==False): next_sigmas = self.next_layer.sigmas2
-        else:                   next_sigmas = tf.ones_like(self.next_layer.sigmas2)
-        scalor = tf.reduce_min(self.sigmas2_)
-	a40 = self.drop_[:,1]*tf.reduce_sum(self.p_*tf.expand_dims(tf.reduce_sum(tf.square(self.W)*scalor/tf.expand_dims(self.sigmas2,0),2),1),2)+scalor/tf.transpose(next_sigmas)
-	if(self.residual==0):  a4 = a40
-	else:                  a4 = a40+tf.expand_dims(tf.square(self.V_)*scalor/self.sigmas2_,-1)+2*tf.einsum('knr,rk,k->kn',self.p_,tf.map_fn(lambda r:tf.diag_part(self.W[:,r,:]),tf.range(self.R),dtype=tf.float32),self.V_*scalor/self.sigmas2_)
+	return self.likelihood(True)+tf.reduce_sum(tf.log(self.v2+eps))*float32(0.5)/float32(self.bs)+float32(self.D_in/2.0)*tf.log(2*PI_CONST)
+    ################### E STEP VARIABLES UPDATES #################################
+    def update_v2(self):
+	return []
+	# method to return the update value of the self.v2 parameter
+        scalor = tf.reduce_min(self.sigmas2)
+	a4     = tf.einsum('kd,d->k',tf.square(self.W),scalor/self.sigmas2)+scalor/self.next_layer.sigmas2
 	return tf.assign(self.v2_,scalor/a4)
-    def update_m(self,ii=0,pretraining=False):
-        rescalor = tf.reduce_min(self.sigmas2_)
+    def update_m(self):
+	return []
+	# method to return the updated value of the self.m parameter
+        rescalor = tf.reduce_min(self.sigmas2)
         Wp       = tf.reduce_sum(tf.expand_dims(self.W,1)*tf.expand_dims(self.p_,-1),2) # (k,n,d)
         inputWp  = tf.transpose(tf.reduce_sum(tf.expand_dims((self.input_-self.b)*rescalor/self.sigmas2,0)*Wp,2)) # ( n k )
         WpWp     = tf.matmul(tf.transpose(Wp,[1,0,2]),tf.transpose(Wp*rescalor/tf.expand_dims(self.sigmas2,0),[1,2,0]))*(1-tf.expand_dims(tf.eye(self.K),0)) # (n k k)
-        if(pretraining):
-            with(tf.device('/device:CPU:0')): inv = tf.matrix_inverse(WpWp+0.4*tf.expand_dims(tf.eye(self.K),0))
-            return tf.reduce_sum(inv*tf.expand_dims(inputWp,1),2)
         next_sigmas = self.next_layer.sigmas2_
         back        = (self.next_layer.backward()+self.next_layer.b)*rescalor/self.next_layer.sigmas2
         b           = inputWp+back
@@ -284,28 +232,9 @@ class DenseLayer(Layer):
         A           = WpWp+tf.expand_dims(tf.diag(rescalor/next_sigmas),0)+D
         with(tf.device('/device:CPU:0')): new_m = tf.matrix_solve(A,tf.expand_dims(b,-1))[:,:,0]#,l2_regularizer=0,fast=True)[:,:,0]
         return tf.assign(self.m_,tf.transpose(new_m))
-    def update_p(self):
-        k       = self.k_
-        Wk      = self.W[self.k_]
-        mk      = self.m_[self.k_]
-	reconstruction = self.input_-self.b-self.backwardmk(self.k_,with_m=1)
-        forward = tf.matmul(reconstruction,Wk/self.sigmas2,transpose_b=True)*tf.expand_dims(mk*self.drop_[self.k_,1],1)                        # (N R)
-        prior   = tf.expand_dims(tf.log(self.pi[self.k_]),0)                                                                       # (1 R)
-        m2v2    = tf.expand_dims((tf.square(mk)+self.v2_[self.k_])*self.drop_[self.k_,1],-1)*tf.expand_dims(tf.reduce_sum(tf.square(Wk)/(2*self.sigmas2),1),0) # (N R)
-	if(self.residual): extra_v2 = tf.expand_dims(self.v2_[self.k_],-1)*tf.expand_dims(self.W[self.k_,:,self.k_]*self.V_[self.k_]/self.sigmas2_[self.k_],0)
-	else:              extra_v2 = 0
-        return tf.scatter_update(self.p_,[self.k_],[tf.nn.softmax(forward+prior-m2v2-extra_v2)])
-	if(self.p_drop==0):
-	    return tf.group(new_m,new_p)
-	## UPDATE DROPOUT
-        proj    = tf.einsum('nd,rd,nr->n',reconstruction,self.W[k]/self.sigmas2,new_p[self.k_])*new_m[self.k_] # (N)
-        squared = tf.einsum('n,nr,rd,d->n',self.v2_[self.k_]+tf.square(new_m[self.k_]),new_p[self.k_],tf.square(self.W[k]),1/self.sigmas2_) #(N)
-        filled0 = tf.fill([self.bs],tf.cast(tf.log(self.p_drop),tf.float32))
-        filled1 = tf.fill([self.bs],tf.cast(tf.log(1-self.p_drop),tf.float32))
-        new_drop = mysoftmax(tf.stack([filled0,filled1-squared*float32(0.5)+proj]),axis=0,coeff=0.)
-        return tf.group(new_m,new_p,tf.scatter_update(self.drop_,[k],[new_drop]))
-                                            ######################## M STEP VARIABLES
+    ################### M STEP VARIABLES UPDATES #################################
     def update_sigma(self,get_value=False):
+	return []
         k1 = self.Sm2+self.Sv2+tf.square(self.b_)
         k2 = tf.reduce_sum(tf.expand_dims(self.SM2V2,-1)*tf.square(self.W),[0,1])
         k3 = tf.reduce_sum(tf.expand_dims(self.SMpMp,-1)*myexpand(self.W,[0,0])*myexpand(self.W,[2,2]),[0,1,2,3])
@@ -317,22 +246,15 @@ class DenseLayer(Layer):
         elif(self.sigma_opt=='channel'):
             v=tf.reduce_sum(tf.reshape(value_,self.input_shape[1:]),axis=[0,1],keepdims=True)/(self.input_shape[1]*self.input_shape[2])
             return tf.assign(self.sigmas2_,tf.reshape(tf.ones([self.input_shape[1],self.input_shape[2],1])*v,[self.D_in]))
-    def update_pi(self): return tf.assign(self.pi,tf.clip_by_value(self.Sp/tf.reduce_sum(self.Sp,axis=1,keepdims=True),0.01,0.99))
     def update_Wk(self):
+	return []
         k = self.k_
-        if(self.leakiness is None):
-            new_w = (self.SMpm[k]-tf.expand_dims(self.SMp[k],1)*self.b-tf.reduce_sum(tf.matmul(tf.transpose(self.SMpMp[k],[1,0,2]),self.W),0))*self.gamma_[k]/tf.expand_dims(self.SM2V2[k]*tf.square(self.gamma_[k])+self.sparsity_prior,-1)
-        else:
-            new_w = tf.expand_dims((self.SMpm[k,0]+self.leakiness*self.SMpm[k,1]-(self.SMp[k,0]+self.leakiness*self.SMp[k,1])*self.b_-tf.reduce_sum(self.W*tf.expand_dims(self.SMpMp[k,0]+self.leakiness*self.SMpMp[k,1],-1),[0,1]))*self.gamma_[k]/((self.SM2V2[k,0]+tf.square(self.leakiness)*self.SM2V2[k,1])*tf.square(self.gamma_[k])+self.sparsity_prior),0)
-        return tf.scatter_update(self.W_,[self.k_],[new_w])#tf.nn.l2_normalize(new_w,0)])
-    def update_BV(self):
-        if(self.update_b): newb = tf.assign(self.b_,self.Sm-tf.reduce_sum(self.W*tf.expand_dims(self.SMp,-1),[0,1]))
-        else: newb = []
-	if(self.residual==0): return newb
-	back = tf.einsum('knr,krd->nd',self.p_*tf.expand_dims(self.m_*self.drop_[:,1],-1),self.W)  # (N D)
-	forward = tf.einsum('kn,nk->k',self.m_,self.input_-tf.expand_dims(newb,0)-back)-tf.diag_part(tf.einsum('kn,knr,krd->kd',self.v2_,self.p_,self.W)) # K
-	b = tf.reduce_sum(self.v2_+tf.square(self.m_),1)
-	return tf.group(newb,tf.assign(self.V_,forward/b))
+        new_w = (self.Sinput_m[:,self.k]-self.Sinput*self.b-tf.reduce_sum(tf.matmul(tf.transpose(self.SMpMp[k],[1,0,2]),self.W),0))/(self.SM2V2[k]+self.sparsity_prior)
+        return tf.scatter_update(self.W_,[self.k_],[new_w])
+    def update_b(self):
+	return []
+        if(self.update_b): return tf.assign(self.b,self.Sinput-tf.einsum('k,kd->d',self.Sm,self.W))
+        return []
 
 
 
@@ -1187,69 +1109,98 @@ class PoolLayer(Layer):
 
 
 class InputLayer(Layer):
-        def __init__(self,input_shape,alpha=0.5):
-            self.bs           = input_shape[0]
-            self.input_shape,self.output_shape  = input_shape,input_shape
-            self.alpha        = tf.Variable(alpha)
-            self.mask         = tf.Variable(tf.zeros(input_shape))
-	    self.v2           = tf.Variable(tf.zeros(input_shape))
-            self.m            = tf.Variable(tf.zeros(self.input_shape))
-            self.m_           = tf.transpose(self.m,[3,1,2,0])
-	    self.v2_          = tf.transpose(self.v2,[3,1,2,0])
-	def init_thetaq(self):return tf.assign(self.v2,self.mask)
-        def likelihood(self,batch=0,pretraining=False): return float32(0)
-        def KL(self,pretraining=False):	return float32(0.5)*tf.reduce_sum(tf.log(self.v2+eps)*self.mask)/float32(self.input_shape[0])
-        def update_v2(self,pretraining=False):
-		if(isinstance(self.next_layer,PoolLayer) or isinstance(self.next_layer,ConvLayer) or isinstance(self.next_layer,AltConvLayer)):  a40 = self.next_layer.sigmas2
-                else:                a40 = tf.expand_dims(tf.reshape(self.next_layer.sigmas2_,self.input_shape[1:]),0)
-                return tf.assign(self.v2,self.mask*a40)
-        def update_m(self,opt=0,pretraining=False):
-                if(isinstance(self.next_layer,PoolLayer) or isinstance(self.next_layer,ConvLayer) or isinstance(self.next_layer,AltConvLayer)):  priorm  = self.next_layer.deconv()+self.next_layer.b
-		else:   priorm  = self.next_layer.vector2tensor(self.next_layer.backward()+self.next_layer.b)
-                return tf.assign(self.m,priorm*self.mask+self.m*(1-self.mask))
-        def evidence(self): return float32(0)
+    def __init__(self,input_shape,X,X_mask=None,**kwargs):
+	# input_shape is (N I J C) or (N D)	   
+	print kwargs 
+        self.kwargs_init(kwargs)
+        self.input_shape,self.output_shape  = input_shape,input_shape
+	self.N                              = X.shape[0]
+	# THETAQ PARAMETERS
+	self.v2           = tf.Variable(tf.zeros(input_shape))
+        self.m            = tf.Variable(tf.zeros(input_shape))
+	self.mask         = tf.Variable(tf.zeros(input_shape))
+        # THETAQ DATA for all the dataset, as opposed to the variables which have the size of the batch
+        # only need for m as v2 is the same across data (n invariant)
+        self.mask_data         = X_mask if X_mask is not None else ones_like(X).astype('float32')
+	self.mask_placeholder  = tf.placeholder(tf.float32,self.input_shape)
+        self.m_data            = X.astype('float32')
+        self.m_placeholder     = tf.placeholder(tf.float32,self.input_shape)
+        self.v2_data           = self.init_v2_data(X.shape)
+        self.v2_placeholder    = tf.placeholder(tf.float32,self.input_shape)
+        self.thetaq_assign_op  = tf.group(tf.assign(self.m,self.m_placeholder),tf.assign(self.v2,self.v2_placeholder),tf.assign(self.mask,self.mask_placeholder))
+    def set_batch(self,session,indices):
+        if(len(indices)==self.N): return
+        session.run(self.thetaq_assign_op,feed_dict={self.m_placeholder:self.m_data[indices],self.v2_placeholder:self.v2_data[indices],self.mask_placeholder:self.mask_data[indices]})
+    def save_batch(self,session,indices):
+        if(len(indices)==self.N): return
+        self.m_data[indices] =session.run(self.m)
+        self.v2_data[indices]=session.run(self.v2)
+    def init_thetaq(self):
+	return tf.assign(self.v2,self.mask)
+    def KL(self,pretraining=False):
+	return float32(0.5)*tf.reduce_sum(tf.log(self.v2+eps)*self.mask)/float32(self.input_shape[0])
+    def update_v2(self,pretraining=False):
+        a40 = tf.expand_dims(tf.reshape(self.next_layer.sigmas2_,self.input_shape[1:]),0)
+        return tf.assign(self.v2,self.mask/a40)
+    def update_m(self,opt=0,pretraining=False):
+	priorm  = self.next_layer.backward()
+        return tf.assign(self.m,priorm*self.mask+self.m*(1-self.mask))
+    def evidence(self): 
+	return float32(0)
 
 
 
 class CategoricalLastLayer(Layer):
-    def __init__(self,input_layer,R,sparsity_prior=0,sigma='local',alpha=0.5,update_b=True,init_W = tf.random_normal):
-        self.bs                            = input_layer.bs
-        self.D_in                          = prod(input_layer.output_shape[1:])
-        self.input_shape,self.input_shape_,self.output_shape = input_layer.output_shape,(self.bs,self.D_in),(self.bs,1)
-        self.update_b          = update_b
-        self.mask              = tf.Variable(tf.zeros(input_layer.output_shape[0]))
-        self.alpha             = tf.Variable(alpha)
+    def __init__(self,input_layer,R,Y=None,Y_mask=None,**kwargs):
+	self.kwargs_init(kwargs)
+	self.R                 = R
+	self.N                 = input_layer.N
         self.input_layer       = input_layer
+	self.input_shape       = input_layer.output_shape
         input_layer.next_layer = self
-	self.sigma_opt         = sigma
-	self.sparsity_prior    = sparsity_prior
-        self.input             = input_layer.m
-	self.R,self.K                 = R,R
-	# PARAMETERS
-        self.sigmas2_= tf.Variable(tf.ones(self.D_in))
-        self.sigmas2 = tf.expand_dims(self.sigmas2_,0)
-	self.W       = tf.Variable(init_W((R,self.D_in))/sqrt(self.D_in))
-	self.pi      = tf.Variable(tf.ones(R)/R)
-        self.b_      = tf.Variable(tf.zeros(self.D_in))
-        self.b       = tf.expand_dims(self.b_,0)
-	# VI PARAMETERS
-        self.p_      = tf.Variable(mysoftmax(tf.random_normal((self.bs,R)),axis=1))# (N R)
-        # STATISTICS
-        self.Spm = tf.Variable(tf.zeros((self.R,self.D_in)))
-        self.Sv2 = tf.Variable(tf.zeros(self.D_in))
-        self.Sm  = tf.Variable(tf.zeros(self.D_in))
-        self.Sp  = tf.Variable(tf.zeros(self.R))
-        self.Sm2 = tf.Variable(tf.zeros((self.D_in)))
-        self.apodization = 1
+        # RESHAPE IF NEEDED (acting as a flatten layer)
         if(len(self.input_shape)>2):
-            self.is_flat = False
-            self.input_  = tf.reshape(self.input,(self.bs,self.D_in))
+            self.is_flat     = False
+            self.D           = prod(self.input_shape[1:])
+            self.input_shape = (self.input_shape[0],self.D)#potentially different if flattened
+            self.input       = tf.reshape(self.input_layer.m,self.input_shape)
         else:
-            self.is_flat = True
-            self.input_  = self.input
-        self.W_indices=asarray([0]);self.k_=tf.placeholder(tf.int32)
-    def init_W(self,W,b):      return tf.group(tf.assign(self.W,W),tf.assign(self.b_,b))
-    def vector2tensor(self,u): return tf.reshape(u,self.input_shape)
+            self.is_flat     = True
+            self.D           = self.input_shape[-1]
+            self.input_shape = (self.input_shape[0],self.D)#potentially different if flattened
+            self.input       = self.input
+        self.mask              = tf.Variable(tf.zeros(input_layer.output_shape[0]))
+	# THETA PARAMETERS
+        self.sigmas2 = tf.Variable(tf.ones(self.D))
+	self.W       = tf.Variable(self.init_W((R,self.D)))
+	self.pi      = tf.Variable(tf.ones(R)/R)
+        self.b       = tf.Variable(self.init_b(self.D))
+	# THETAQ PARAMETERS
+        self.p       = tf.Variable(tf.zeros((self.input_shape[0],R))) # (N R)
+	self.mask    = tf.Variable(tf.zeros((self.input_shape[0],R))) # (N R)
+        # THETAQ DATA for all the dataset, as opposed to the variables which have the size of the batch
+        # only need for m as v2 is the same across data (n invariant)
+	self.mask_data        = Y_mask if Y_mask is not None else ones_like(Y).astype('float32')
+        self.mask_placeholder = tf.placeholder(tf.float32,(self.input_shape[0],R))
+        self.p_data           = self.init_p_data((self.N,R)).astype('float32') if Y is None else self.init_p_data((self.N,R)).astype('float32')*self.p_mask+Y*(1-self.p_mask)
+        self.p_placeholder    = tf.placeholder(tf.float32,(self.input_shape[0],R))
+        self.thetaq_assign_op = tf.group(tf.assign(self.p,self.p_placeholder),tf.assign(self.mask,self.mask_placeholder))
+        # STATISTICS
+	self.alpha = tf.Variable(tf.zeros(1))
+        self.Spm   = tf.Variable(tf.zeros((self.R,self.D)))
+        self.Sv2   = tf.Variable(tf.zeros(self.D))
+        self.Sm    = tf.Variable(tf.zeros(self.D))
+        self.Sp    = tf.Variable(tf.zeros(self.R))
+        self.Sm2   = tf.Variable(tf.zeros((self.D)))
+	# empty variable for consistancy
+	self.k_        = tf.placeholder(tf.int32)
+        self.W_indices = asarray([0])
+    def set_batch(self,session,indices):
+        if(len(indices)==self.N): return
+        session.run(self.thetaq_assign_op,feed_dict={self.p_placeholder:self.p_data[indices],self.mask_placeholder:self.mask[indices]})
+    def save_batch(self,session,indices):
+        if(len(indices)==self.N): return
+        self.p[indices]=session.run(self.p)
     def update_S(self):
         Spm = tf.matmul(self.p_,self.input_,transpose_a=True)/self.bs
         if(self.is_flat): Sv2 = tf.reduce_sum(self.input_layer.v2_,1)/self.bs
@@ -1260,19 +1211,19 @@ class CategoricalLastLayer(Layer):
         return tf.group(tf.assign(self.Spm,self.alpha*Spm+(1-self.alpha)*self.Spm),tf.assign(self.Sv2,self.alpha*Sv2+(1-self.alpha)*self.Sv2),
                         tf.assign(self.Sp,self.alpha*Sp+(1-self.alpha)*self.Sp),tf.assign(self.Sm2,self.alpha*Sm2+(1-self.alpha)*self.Sm2),
                         tf.assign(self.Sm,self.alpha*Sm+(1-self.alpha)*self.Sm))
-    def backward(self,flat=1):
-	if(flat):  return tf.tensordot(self.p_,self.W,[[1],[0]])
-	else:      return self.vector2tensor(tf.tensordot(self.p_,self.W,[[1],[0]]))
-    def sample(self,samples,K=None,sigma=1,deterministic=0):
+    def backward(self,flat=0):
+	output = tf.matmul(self.p,self.W)+tf.expand_dims(self.b,0)
+	if(flat or self.is_flat):  return output
+	else:      return tf.reshape(output,self.input_layer.output_shape)
+    def sample(self,K=None,sigma_multiplier=1):
         """ K must be a pre imposed region used for generation
         if not given it is generated according to pi, its shape 
-        must be (N K R) with a one hot vector on the last dimension
-        sampels is a dummy variable not used in this layer   """
-        noise = sigma*tf.random_normal(self.input_shape_)*tf.sqrt(self.sigmas2)
+        must be (N R) with a one hot vector on the last dimension"""
+        noise = sigma*tf.random_normal(self.input_shape)*tf.expand_dims(tf.sqrt(self.sigmas2),0)
         if(K is None): K = tf.one_hot(tf.multinomial(tf.log(tf.expand_dims(self.pi,0)),self.bs)[0],self.R)
-        value = tf.tensordot(K,self.W,[[1],[0]])+noise+self.b
-	if(self.is_flat): return value
-	else:             return self.vector2tensor(value)
+        samples = tf.matmul(K,self.W)+noise+self.b
+	if(self.is_flat): return samples
+	else:             return tf.reshape(samples,self.input_layer.output_shape)
     def evidence(self):
         k1  = -tf.reduce_sum(tf.log(self.sigmas2_)/2)
         k2  = tf.einsum('nr,r->n',self.p_,tf.log(self.pi))
@@ -1284,8 +1235,8 @@ class CategoricalLastLayer(Layer):
         m2v2        = -tf.einsum('nr,rd,d->n',self.p_,tf.square(self.W),1/self.sigmas2_)*float32(0.5) #(N D) -> (D)
         sum_norm_k  = tf.einsum('nd,d->n',tf.square(tf.tensordot(self.p_,self.W,[[1],[0]])),1/self.sigmas2_)*float32(0.5) #(D)
         return k1+k2+k3+(reconstruction+input_v2+sum_norm_k+m2v2)
-    def likelihood(self,batch=None,pretraining=False):
-        if(batch==0):
+    def likelihood(self,E_step=True):
+        if(E_step):
             k1  = -tf.reduce_sum(tf.log(self.sigmas2_))*float32(0.5)-tf.log(2*PI_CONST)*float32(self.D_in*0.5)+tf.reduce_sum(tf.reduce_sum(self.p_,0)*tf.log(self.pi))/self.bs
             if(self.is_flat): k2 = -tf.reduce_sum(tf.reduce_sum(self.input_layer.v2,0)/self.sigmas2_)*0.5/self.bs
             else:             k2 = -tf.reduce_sum(tf.reshape(tf.reduce_sum(self.input_layer.v2,0),[self.D_in])/self.sigmas2_)*0.5/self.bs
@@ -1304,7 +1255,7 @@ class CategoricalLastLayer(Layer):
         prior   = tf.expand_dims(self.pi,0)
         V       = tf.nn.softmax(proj+tf.log(prior))
         return tf.assign(self.p_,V*tf.expand_dims(self.mask,-1)+self.p_*(1-tf.expand_dims(self.mask,-1)))
-                                        ################### M STEP UPDATES
+        ################### M STEP UPDATES
     def update_sigma(self,get_value=False):
         k1 = tf.square(self.b_)+self.Sm2+self.Sv2+tf.reduce_sum(tf.expand_dims(self.Sp,-1)*tf.square(self.W),0)
         k2 = -2*tf.reduce_sum(self.Spm*self.W,0)+(-self.Sm+tf.reduce_sum(tf.expand_dims(self.Sp,-1)*self.W,0))*self.b_
@@ -1313,8 +1264,10 @@ class CategoricalLastLayer(Layer):
         if(self.sigma_opt=='local'):    return tf.assign(self.sigmas2_,value_)
         elif(self.sigma_opt=='global'): return tf.assign(self.sigmas2_,tf.fill([self.D_in],tf.reduce_sum(value_)/self.D_in))
         elif(self.sigma_opt=='none'):   return []
-    def update_pi(self): return []#tf.assign(self.pi,self.Sp/tf.reduce_sum(self.Sp))
-    def update_Wk(self): return tf.assign(self.W,self.Spm/(tf.expand_dims(self.Sp,-1)+self.sparsity_prior)-self.b_/(1+self.sparsity_prior))
+    def update_pi(self): 
+	return tf.assign(self.pi,self.Sp/tf.reduce_sum(self.Sp))
+    def update_Wk(self): 
+	return tf.assign(self.W,self.Spm/(tf.expand_dims(self.Sp,-1)+self.sparsity_prior)-self.b_/(1+self.sparsity_prior))
     def update_BV(self):
         if(self.update_b): return tf.assign(self.b_,self.Sm-tf.reduce_sum(self.W*tf.expand_dims(self.Sp,1),0))
         else:              return []

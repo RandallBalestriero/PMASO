@@ -48,7 +48,7 @@ input_shape = XX.shape
 
 if(MODEL==0):
     layers1 = [InputLayer(input_shape)]
-    layers1.append(DenseLayer(layers1[-1],K=NEURONS,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass))
+#    layers1.append(DenseLayer(layers1[-1],K=NEURONS,R=2,leakiness=leakiness,sparsity_prior=0.,sigma=sigmass))
     layers1.append(ContinuousLastLayer(layers1[-1],sigma=sigmass))
 elif(MODEL==1):
     layers1 = [InputLayer(input_shape)]
